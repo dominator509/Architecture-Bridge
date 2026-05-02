@@ -46,7 +46,7 @@ describe("Default-deny policy engine", () => {
     const result = evaluatePolicy({
       principal: { id: "user-1", type: "user" },
       action: "read",
-      resource: { type: "workspace", id: "wsp_xyz" },
+      resource: { type: "workspace", id: "wrk_xyz" },
     });
     const after = new Date();
     expect(result.evaluatedAt.getTime()).toBeGreaterThanOrEqual(

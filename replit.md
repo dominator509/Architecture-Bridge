@@ -33,8 +33,8 @@ lib/
 
 | Table | ID Prefix | Purpose |
 |-------|-----------|---------|
-| tenants | `tnt_` | Root org unit |
-| workspaces | `wsp_` | Tenant subdivision |
+| tenants | `ten_` | Root org unit |
+| workspaces | `wrk_` | Tenant subdivision |
 | environments | `env_` | dev/staging/prod per workspace |
 | packages | `pkg_` | Agent package registry |
 | package_versions | `pkgv_` | Immutable versioned manifests |
@@ -118,7 +118,7 @@ pnpm --filter @workspace/api-server test       # Run test suite (10 tests)
 
 ## Seed Data
 
-The database is seeded with sample data under tenant `tnt_SeedDemo0000000000001` ("Acme Corp"):
+The database is seeded with sample data under tenant `ten_SeedDemo0000000000001` ("Acme Corp"):
 - 2 workspaces, 4 environments, 2 packages, 3 package versions
 - 3 deployments (active/stopped/pending)
 - 2 approval requests (pending/approved)

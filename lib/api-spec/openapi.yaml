@@ -1027,7 +1027,7 @@ components:
       properties:
         id:
           type: string
-          description: "Prefixed ID: tnt_{nanoid}"
+          description: "Prefixed ID: ten_{nanoid}"
         name:
           type: string
         slug:
@@ -1114,7 +1114,7 @@ components:
       properties:
         id:
           type: string
-          description: "Prefixed ID: wsp_{nanoid}"
+          description: "Prefixed ID: wrk_{nanoid}"
         tenantId:
           type: string
         name:

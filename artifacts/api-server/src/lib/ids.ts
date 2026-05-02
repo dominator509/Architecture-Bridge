@@ -2,9 +2,9 @@
  * Architecture-aligned prefixed ID generation.
  * Format: <prefix>_<nanoid-21>
  *
- * Prefixes:
- *   tnt_  — Tenant
- *   wsp_  — Workspace
+ * Prefixes (Blueprint v0.1):
+ *   ten_  — Tenant
+ *   wrk_  — Workspace
  *   env_  — Environment
  *   pkg_  — Package
  *   pkgv_ — PackageVersion
@@ -24,8 +24,8 @@ const nanoid = customAlphabet(
 
 const prefixed = (prefix: string) => `${prefix}_${nanoid()}`;
 
-export const newTenantId = () => prefixed("tnt");
-export const newWorkspaceId = () => prefixed("wsp");
+export const newTenantId = () => prefixed("ten");
+export const newWorkspaceId = () => prefixed("wrk");
 export const newEnvironmentId = () => prefixed("env");
 export const newPackageId = () => prefixed("pkg");
 export const newPackageVersionId = () => prefixed("pkgv");

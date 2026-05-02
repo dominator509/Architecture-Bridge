@@ -30,7 +30,7 @@ export const TenantStatus = {
 } as const;
 
 export interface Tenant {
-  /** Prefixed ID: tnt_{nanoid} */
+  /** Prefixed ID: ten_{nanoid} */
   id: string;
   name: string;
   slug: string;
@@ -87,7 +87,7 @@ export const WorkspaceStatus = {
 } as const;
 
 export interface Workspace {
-  /** Prefixed ID: wsp_{nanoid} */
+  /** Prefixed ID: wrk_{nanoid} */
   id: string;
   tenantId: string;
   name: string;

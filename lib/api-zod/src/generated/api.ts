@@ -38,7 +38,7 @@ export const ListTenantsQueryParams = zod.object({
 export const ListTenantsResponse = zod.object({
   items: zod.array(
     zod.object({
-      id: zod.string().describe("Prefixed ID: tnt_{nanoid}"),
+      id: zod.string().describe("Prefixed ID: ten_{nanoid}"),
       name: zod.string(),
       slug: zod.string(),
       status: zod.enum(["active", "suspended", "deleted"]),
@@ -60,7 +60,7 @@ export const GetTenantParams = zod.object({
 });
 
 export const GetTenantResponse = zod.object({
-  id: zod.string().describe("Prefixed ID: tnt_{nanoid}"),
+  id: zod.string().describe("Prefixed ID: ten_{nanoid}"),
   name: zod.string(),
   slug: zod.string(),
   status: zod.enum(["active", "suspended", "deleted"]),
@@ -83,7 +83,7 @@ export const UpdateTenantBody = zod.object({
 });
 
 export const UpdateTenantResponse = zod.object({
-  id: zod.string().describe("Prefixed ID: tnt_{nanoid}"),
+  id: zod.string().describe("Prefixed ID: ten_{nanoid}"),
   name: zod.string(),
   slug: zod.string(),
   status: zod.enum(["active", "suspended", "deleted"]),
@@ -124,7 +124,7 @@ export const ListWorkspacesQueryParams = zod.object({
 export const ListWorkspacesResponse = zod.object({
   items: zod.array(
     zod.object({
-      id: zod.string().describe("Prefixed ID: wsp_{nanoid}"),
+      id: zod.string().describe("Prefixed ID: wrk_{nanoid}"),
       tenantId: zod.string(),
       name: zod.string(),
       slug: zod.string(),
@@ -148,7 +148,7 @@ export const GetWorkspaceParams = zod.object({
 });
 
 export const GetWorkspaceResponse = zod.object({
-  id: zod.string().describe("Prefixed ID: wsp_{nanoid}"),
+  id: zod.string().describe("Prefixed ID: wrk_{nanoid}"),
   tenantId: zod.string(),
   name: zod.string(),
   slug: zod.string(),
@@ -173,7 +173,7 @@ export const UpdateWorkspaceBody = zod.object({
 });
 
 export const UpdateWorkspaceResponse = zod.object({
-  id: zod.string().describe("Prefixed ID: wsp_{nanoid}"),
+  id: zod.string().describe("Prefixed ID: wrk_{nanoid}"),
   tenantId: zod.string(),
   name: zod.string(),
   slug: zod.string(),
