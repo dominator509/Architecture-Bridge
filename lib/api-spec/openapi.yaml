@@ -3,20 +3,43 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Agent Deployment System — Control Plane API (Phase 1-2)
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: tenants
+    description: Tenant registry
+  - name: workspaces
+    description: Workspace registry (tenant-scoped)
+  - name: environments
+    description: Environment registry (workspace-scoped)
+  - name: packages
+    description: Tenant package registry
+  - name: package-versions
+    description: Package version registry
+  - name: deployments
+    description: Deployment records
+  - name: config-snapshots
+    description: Resolved config snapshot skeleton
+  - name: audit
+    description: Audit event log
+  - name: action-ledger
+    description: Action ledger
+  - name: approvals
+    description: Approval requests and decisions
+  - name: policy
+    description: Default-deny policy evaluation skeleton
+
 paths:
+  # ─── Health ────────────────────────────────────────────────────────────────
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +47,1653 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ─── Tenants ───────────────────────────────────────────────────────────────
+  /tenants:
+    post:
+      operationId: createTenant
+      tags: [tenants]
+      summary: Create a tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantBody"
+      responses:
+        "201":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "409":
+          description: Slug already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listTenants
+      tags: [tenants]
+      summary: List all tenants
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, suspended, deleted]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of tenants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantList"
+
+  /tenants/{tenantId}:
+    get:
+      operationId: getTenant
+      tags: [tenants]
+      summary: Get a tenant by ID
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      responses:
+        "200":
+          description: Tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateTenant
+      tags: [tenants]
+      summary: Update a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantBody"
+      responses:
+        "200":
+          description: Updated tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Workspaces ────────────────────────────────────────────────────────────
+  /tenants/{tenantId}/workspaces:
+    post:
+      operationId: createWorkspace
+      tags: [workspaces]
+      summary: Create a workspace within a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceBody"
+      responses:
+        "201":
+          description: Workspace created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "409":
+          description: Slug already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listWorkspaces
+      tags: [workspaces]
+      summary: List workspaces for a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, archived]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of workspaces
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceList"
+
+  /tenants/{tenantId}/workspaces/{workspaceId}:
+    get:
+      operationId: getWorkspace
+      tags: [workspaces]
+      summary: Get a workspace
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateWorkspace
+      tags: [workspaces]
+      summary: Update a workspace
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceBody"
+      responses:
+        "200":
+          description: Updated workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Environments ──────────────────────────────────────────────────────────
+  /tenants/{tenantId}/workspaces/{workspaceId}/environments:
+    post:
+      operationId: createEnvironment
+      tags: [environments]
+      summary: Create an environment within a workspace
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEnvironmentBody"
+      responses:
+        "201":
+          description: Environment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "409":
+          description: Slug already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listEnvironments
+      tags: [environments]
+      summary: List environments for a workspace
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/workspaceId"
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [development, staging, production]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of environments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentList"
+
+  /tenants/{tenantId}/workspaces/{workspaceId}/environments/{environmentId}:
+    get:
+      operationId: getEnvironment
+      tags: [environments]
+      summary: Get an environment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/workspaceId"
+        - $ref: "#/components/parameters/environmentId"
+      responses:
+        "200":
+          description: Environment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateEnvironment
+      tags: [environments]
+      summary: Update an environment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/workspaceId"
+        - $ref: "#/components/parameters/environmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEnvironmentBody"
+      responses:
+        "200":
+          description: Updated environment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Packages ──────────────────────────────────────────────────────────────
+  /tenants/{tenantId}/packages:
+    post:
+      operationId: createPackage
+      tags: [packages]
+      summary: Create a tenant package
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePackageBody"
+      responses:
+        "201":
+          description: Package created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Package"
+        "409":
+          description: Slug already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listPackages
+      tags: [packages]
+      summary: List packages for a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, deprecated, archived]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageList"
+
+  /tenants/{tenantId}/packages/{packageId}:
+    get:
+      operationId: getPackage
+      tags: [packages]
+      summary: Get a package
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/packageId"
+      responses:
+        "200":
+          description: Package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Package"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Package Versions ──────────────────────────────────────────────────────
+  /tenants/{tenantId}/packages/{packageId}/versions:
+    post:
+      operationId: createPackageVersion
+      tags: [package-versions]
+      summary: Create a package version
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/packageId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePackageVersionBody"
+      responses:
+        "201":
+          description: Package version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageVersion"
+        "409":
+          description: Version already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listPackageVersions
+      tags: [package-versions]
+      summary: List versions for a package
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/packageId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, deprecated]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of package versions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageVersionList"
+
+  /tenants/{tenantId}/packages/{packageId}/versions/{versionId}:
+    get:
+      operationId: getPackageVersion
+      tags: [package-versions]
+      summary: Get a specific package version
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/packageId"
+        - $ref: "#/components/parameters/versionId"
+      responses:
+        "200":
+          description: Package version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageVersion"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Deployments ───────────────────────────────────────────────────────────
+  /tenants/{tenantId}/deployments:
+    get:
+      operationId: listAllDeployments
+      tags: [deployments]
+      summary: List all deployments across all environments for a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, failed, stopped]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentList"
+
+  /tenants/{tenantId}/environments/{environmentId}/deployments:
+    post:
+      operationId: createDeployment
+      tags: [deployments]
+      summary: Create a deployment in an environment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/environmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeploymentBody"
+      responses:
+        "201":
+          description: Deployment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "403":
+          description: Policy denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: listDeployments
+      tags: [deployments]
+      summary: List deployments in an environment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/environmentId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, active, failed, stopped]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of deployments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentList"
+
+  /tenants/{tenantId}/deployments/{deploymentId}:
+    get:
+      operationId: getDeployment
+      tags: [deployments]
+      summary: Get a deployment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/deploymentId"
+      responses:
+        "200":
+          description: Deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateDeployment
+      tags: [deployments]
+      summary: Update deployment status
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/deploymentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDeploymentBody"
+      responses:
+        "200":
+          description: Updated deployment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Config Snapshots (skeleton) ───────────────────────────────────────────
+  /tenants/{tenantId}/deployments/{deploymentId}/config-snapshot:
+    post:
+      operationId: resolveConfigSnapshot
+      tags: [config-snapshots]
+      summary: Resolve and store a config snapshot for a deployment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/deploymentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveConfigSnapshotBody"
+      responses:
+        "201":
+          description: Config snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigSnapshot"
+        "404":
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    get:
+      operationId: getConfigSnapshot
+      tags: [config-snapshots]
+      summary: Get the latest resolved config snapshot for a deployment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/deploymentId"
+      responses:
+        "200":
+          description: Config snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigSnapshot"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Audit Events ──────────────────────────────────────────────────────────
+  /tenants/{tenantId}/audit-events:
+    get:
+      operationId: listAuditEvents
+      tags: [audit]
+      summary: List audit events for a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: actorId
+          in: query
+          schema:
+            type: string
+        - name: eventType
+          in: query
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of audit events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventList"
+
+  # ─── Action Ledger ─────────────────────────────────────────────────────────
+  /tenants/{tenantId}/action-ledger:
+    get:
+      operationId: listActionLedger
+      tags: [action-ledger]
+      summary: List action ledger entries for a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - name: deploymentId
+          in: query
+          schema:
+            type: string
+        - name: actorId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, succeeded, failed, cancelled]
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of action ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionLedgerList"
+
+  # ─── Approvals ─────────────────────────────────────────────────────────────
+  /tenants/{tenantId}/approvals:
+    post:
+      operationId: createApprovalRequest
+      tags: [approvals]
+      summary: Create an approval request
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApprovalRequestBody"
+      responses:
+        "201":
+          description: Approval request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequest"
+    get:
+      operationId: listApprovalRequests
+      tags: [approvals]
+      summary: List approval requests for a tenant
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, expired]
+        - name: requesterId
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of approval requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequestList"
+
+  /tenants/{tenantId}/approvals/{approvalId}:
+    get:
+      operationId: getApprovalRequest
+      tags: [approvals]
+      summary: Get an approval request
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/approvalId"
+      responses:
+        "200":
+          description: Approval request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequest"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /tenants/{tenantId}/approvals/{approvalId}/decision:
+    post:
+      operationId: submitApprovalDecision
+      tags: [approvals]
+      summary: Submit an approval or rejection decision
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/approvalId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionBody"
+      responses:
+        "200":
+          description: Updated approval request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequest"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Decision already made
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  # ─── Policy (default-deny skeleton) ───────────────────────────────────────
+  /tenants/{tenantId}/policy/evaluate:
+    post:
+      operationId: evaluatePolicy
+      tags: [policy]
+      summary: Evaluate a policy decision (default-deny skeleton)
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyEvaluationRequest"
+      responses:
+        "200":
+          description: Policy decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyDecision"
+
+  # ─── Summary (wow endpoint) ────────────────────────────────────────────────
+  /tenants/{tenantId}/summary:
+    get:
+      operationId: getTenantSummary
+      tags: [tenants]
+      summary: Get tenant dashboard summary counts
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+      responses:
+        "200":
+          description: Tenant summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantSummary"
+
 components:
+  parameters:
+    tenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+    workspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema:
+        type: string
+    environmentId:
+      name: environmentId
+      in: path
+      required: true
+      schema:
+        type: string
+    packageId:
+      name: packageId
+      in: path
+      required: true
+      schema:
+        type: string
+    versionId:
+      name: versionId
+      in: path
+      required: true
+      schema:
+        type: string
+    deploymentId:
+      name: deploymentId
+      in: path
+      required: true
+      schema:
+        type: string
+    approvalId:
+      name: approvalId
+      in: path
+      required: true
+      schema:
+        type: string
+
   schemas:
+    # ── Shared ────────────────────────────────────────────────────────────────
     HealthStatus:
       type: object
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      required: [error]
+
+    Metadata:
+      type: object
+      additionalProperties: true
+
+    # ── Tenant ────────────────────────────────────────────────────────────────
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: tnt_{nanoid}"
+        name:
+          type: string
+        slug:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, slug, status, createdAt, updatedAt]
+
+    TenantList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tenant"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreateTenantBody:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+      required: [name, slug]
+
+    UpdateTenantBody:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    TenantSummary:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        workspaceCount:
+          type: integer
+        environmentCount:
+          type: integer
+        packageCount:
+          type: integer
+        activeDeploymentCount:
+          type: integer
+        pendingApprovalCount:
+          type: integer
+        recentAuditEventCount:
+          type: integer
+      required:
+        - tenantId
+        - workspaceCount
+        - environmentCount
+        - packageCount
+        - activeDeploymentCount
+        - pendingApprovalCount
+        - recentAuditEventCount
+
+    # ── Workspace ─────────────────────────────────────────────────────────────
+    Workspace:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: wsp_{nanoid}"
+        tenantId:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        status:
+          type: string
+          enum: [active, archived]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, tenantId, name, slug, status, createdAt, updatedAt]
+
+    WorkspaceList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workspace"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreateWorkspaceBody:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+      required: [name, slug]
+
+    UpdateWorkspaceBody:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, archived]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    # ── Environment ───────────────────────────────────────────────────────────
+    Environment:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: env_{nanoid}"
+        workspaceId:
+          type: string
+        tenantId:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        type:
+          type: string
+          enum: [development, staging, production]
+        status:
+          type: string
+          enum: [active, inactive]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, workspaceId, tenantId, name, slug, type, status, createdAt, updatedAt]
+
+    EnvironmentList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Environment"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreateEnvironmentBody:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        type:
+          type: string
+          enum: [development, staging, production]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+      required: [name, slug, type]
+
+    UpdateEnvironmentBody:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    # ── Package ───────────────────────────────────────────────────────────────
+    Package:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: pkg_{nanoid}"
+        tenantId:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, deprecated, archived]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, tenantId, name, slug, status, createdAt, updatedAt]
+
+    PackageList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Package"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreatePackageBody:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+      required: [name, slug]
+
+    # ── PackageVersion ────────────────────────────────────────────────────────
+    PackageVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: pkgv_{nanoid}"
+        packageId:
+          type: string
+        tenantId:
+          type: string
+        version:
+          type: string
+          description: Semantic version string
+        manifest:
+          type: object
+          additionalProperties: true
+          description: Package manifest — agent config, capabilities, constraints
+        status:
+          type: string
+          enum: [draft, published, deprecated]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, packageId, tenantId, version, manifest, status, createdAt, updatedAt]
+
+    PackageVersionList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PackageVersion"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreatePackageVersionBody:
+      type: object
+      properties:
+        version:
+          type: string
+        manifest:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [draft, published]
+          default: draft
+      required: [version, manifest]
+
+    # ── Deployment ────────────────────────────────────────────────────────────
+    Deployment:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: dep_{nanoid}"
+        environmentId:
+          type: string
+        packageVersionId:
+          type: string
+        tenantId:
+          type: string
+        status:
+          type: string
+          enum: [pending, active, failed, stopped]
+        configSnapshotId:
+          type: string
+          nullable: true
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, environmentId, packageVersionId, tenantId, status, createdAt, updatedAt]
+
+    DeploymentList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Deployment"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreateDeploymentBody:
+      type: object
+      properties:
+        packageVersionId:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+      required: [packageVersionId]
+
+    UpdateDeploymentBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, active, failed, stopped]
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+
+    # ── ConfigSnapshot ────────────────────────────────────────────────────────
+    ConfigSnapshot:
+      type: object
+      description: >
+        Immutable resolved config snapshot. Connector/provider resolution is
+        a future-phase placeholder — manifest fields are stored as-is.
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: cfg_{nanoid}"
+        deploymentId:
+          type: string
+        tenantId:
+          type: string
+        resolvedConfig:
+          type: object
+          additionalProperties: true
+        schemaVersion:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, deploymentId, tenantId, resolvedConfig, schemaVersion, createdAt]
+
+    ResolveConfigSnapshotBody:
+      type: object
+      properties:
+        configOverrides:
+          type: object
+          additionalProperties: true
+          description: >
+            Optional caller-supplied overrides merged onto the package version
+            manifest at resolution time. Provider-specific resolution is a
+            future-phase concern.
+        schemaVersion:
+          type: string
+          default: "1.0"
+      required: []
+
+    # ── AuditEvent ────────────────────────────────────────────────────────────
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: aud_{nanoid}"
+        tenantId:
+          type: string
+        actorId:
+          type: string
+        actorType:
+          type: string
+          enum: [user, system, agent]
+        eventType:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        ipAddress:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, tenantId, actorId, actorType, eventType, resourceType, resourceId, createdAt]
+
+    AuditEventList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    # ── ActionLedger ──────────────────────────────────────────────────────────
+    ActionLedgerEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: act_{nanoid}"
+        tenantId:
+          type: string
+        deploymentId:
+          type: string
+          nullable: true
+        actionType:
+          type: string
+        actorId:
+          type: string
+        actorType:
+          type: string
+          enum: [user, system, agent]
+        status:
+          type: string
+          enum: [pending, succeeded, failed, cancelled]
+        requestPayload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        responsePayload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, tenantId, actionType, actorId, actorType, status, createdAt]
+
+    ActionLedgerList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionLedgerEntry"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    # ── Approval ──────────────────────────────────────────────────────────────
+    ApprovalRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: "Prefixed ID: apr_{nanoid}"
+        tenantId:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        action:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired]
+        requesterId:
+          type: string
+        reviewerId:
+          type: string
+          nullable: true
+        requestPayload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        decisionPayload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, tenantId, resourceType, resourceId, action, status, requesterId, createdAt, updatedAt]
+
+    ApprovalRequestList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalRequest"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]
+
+    CreateApprovalRequestBody:
+      type: object
+      properties:
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        action:
+          type: string
+        requesterId:
+          type: string
+        requestPayload:
+          type: object
+          additionalProperties: true
+        expiresAt:
+          type: string
+          format: date-time
+      required: [resourceType, resourceId, action, requesterId]
+
+    ApprovalDecisionBody:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        reviewerId:
+          type: string
+        decisionPayload:
+          type: object
+          additionalProperties: true
+      required: [decision, reviewerId]
+
+    # ── Policy ────────────────────────────────────────────────────────────────
+    PolicyEvaluationRequest:
+      type: object
+      description: >
+        Default-deny policy evaluation. Full rule engine is a future-phase
+        concern. Current skeleton always denies unless an explicit allow rule
+        matches.
+      properties:
+        principal:
+          type: object
+          properties:
+            id:
+              type: string
+            type:
+              type: string
+              enum: [user, agent, system]
+          required: [id, type]
+        action:
+          type: string
+        resource:
+          type: object
+          properties:
+            type:
+              type: string
+            id:
+              type: string
+          required: [type, id]
+        context:
+          type: object
+          additionalProperties: true
+      required: [principal, action, resource]
+
+    PolicyDecision:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type: string
+        matchedRule:
+          type: string
+          nullable: true
+        evaluatedAt:
+          type: string
+          format: date-time
+      required: [allowed, reason, evaluatedAt]

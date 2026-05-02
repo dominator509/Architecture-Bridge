@@ -48,20 +48,20 @@ export default defineConfig({
       },
     },
     output: {
-      workspace: apiZodSrc,
+      // No workspace — we manage lib/api-zod/src/index.ts manually so orval
+      // does not regenerate it and cause barrel-collision issues.
+      target: path.resolve(apiZodSrc, "generated", "api.ts"),
       client: "zod",
-      target: "generated",
-      schemas: { path: "generated/types", type: "typescript" },
-      mode: "split",
-      clean: true,
+      mode: "single",
+      clean: false,
       prettier: true,
       override: {
         zod: {
           coerce: {
-            query: ['boolean', 'number', 'string'],
-            param: ['boolean', 'number', 'string'],
-            body: ['bigint', 'date'],
-            response: ['bigint', 'date'],
+            query: ["boolean", "number", "string"],
+            param: ["boolean", "number", "string"],
+            body: ["bigint", "date"],
+            response: ["bigint", "date"],
           },
         },
         useDates: true,
