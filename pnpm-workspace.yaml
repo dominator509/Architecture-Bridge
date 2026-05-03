@@ -43,6 +43,16 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # ── Security CVE overrides ─────────────────────────────────────────────────
+  # Force patched versions of vulnerable transitive dependencies.
+  # Review and remove each line once the direct dependency ships the fix.
+  lodash: '>=4.18.0'
+  path-to-regexp: '>=8.4.0'
+  picomatch: '>=4.0.4'
+  brace-expansion: '>=2.0.3'
+  postcss: '>=8.5.10'
+  yaml: '>=2.8.3'
+  # ── Build tooling overrides ────────────────────────────────────────────────
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'

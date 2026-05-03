@@ -43,6 +43,7 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import { resolveActor } from "../lib/actorContext";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -100,13 +101,7 @@ router.post(
       const { packageVersionId, metadata } = body;
 
       // ── 1. Resolve actor identity from request headers ──────────────────────
-      const rawActorType = (req.headers["x-actor-type"] as string) || "system";
-      const actorType: "user" | "agent" | "system" = (
-        ["user", "agent", "system"] as const
-      ).includes(rawActorType as "user" | "agent" | "system")
-        ? (rawActorType as "user" | "agent" | "system")
-        : "system";
-      const actorId = (req.headers["x-actor-id"] as string) || "system";
+      const { actorId, actorType } = resolveActor(req);
 
       // ── 2. Validate environment + package version belong to this tenant ─────
       const [env] = await db
@@ -412,14 +407,8 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
     if (!body) return;
     const { status, metadata } = body;
 
-    // ── Actor identity from request headers (default: system) ────────────────
-    const rawActorType = (req.headers["x-actor-type"] as string) || "system";
-    const actorType: "user" | "agent" | "system" = (
-      ["user", "agent", "system"] as const
-    ).includes(rawActorType as "user" | "agent" | "system")
-      ? (rawActorType as "user" | "agent" | "system")
-      : "system";
-    const actorId = (req.headers["x-actor-id"] as string) || "system";
+    // ── Actor identity from request headers (with privilege-escalation guard) ─
+    const { actorId, actorType } = resolveActor(req);
 
     // ── Fetch existing deployment (needed for policy gate + audit delta) ─────
     const [existing] = await db

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Full-stack pnpm monorepo implementing Phases 1–4 of an AI Agent Deployment System. Provides a tenant-aware registry, policy enforcement (4-outcome default-deny engine), approval gating with self-approval prevention, action ledger evidence trail, and audit — all exposed via a RESTful API with a React control-plane UI. Phase 4 adds production hardening: Zod validation on all mutations, rate limiting, enhanced healthz, React error boundary, toast feedback, and seed data.
+Full-stack pnpm monorepo implementing Phases 1–4 + Security Audit of an AI Agent Deployment System. Provides a tenant-aware registry, policy enforcement (4-outcome default-deny engine), approval gating with self-approval prevention, action ledger evidence trail, and audit — all exposed via a RESTful API with a React control-plane UI. Phase 4 adds production hardening: Zod validation on all mutations, rate limiting, enhanced healthz, React error boundary, toast feedback, and seed data. Security audit (post-Phase 4) resolved all dependency CVEs and added CORS restriction and actor privilege-escalation protection.
 
 ## Architecture
 
@@ -222,6 +222,41 @@ All 13 pages are fully connected to live API data via generated hooks:
 | Audit Log | `/tenants/:id/audit` | Immutable event stream |
 | Action Ledger | `/tenants/:id/action-ledger` | Status-filtered act_ evidence trail |
 | Policy | `/tenants/:id/policy` | Playground (4-outcome) + Decision History tabs |
+
+## Security Audit Summary
+
+Three-scanner audit (dependency CVE, SAST, HoundDog) run post-Phase 4. All findings resolved.
+
+### Findings & Fixes
+
+| Severity | Category | Finding | Fix |
+|----------|----------|---------|-----|
+| CRITICAL | Architecture | Open CORS — `app.use(cors())` allowed any origin | `ALLOWED_ORIGINS` env-var-driven allowlist; permissive in dev/test, locked in production |
+| CRITICAL | Architecture | `X-Actor-Type: system` forgeable via HTTP header | `lib/actorContext.ts` `resolveActor()` — downgrades `system` claims to `user` unless `X-Internal-Token` matches `API_INTERNAL_TOKEN` env var |
+| HIGH | Dependency | `lodash@4.17.23` — Code Injection via `_.template` (CVE-2026-4800) | `pnpm-workspace.yaml` override `lodash: >=4.18.0` |
+| HIGH | Dependency | `path-to-regexp@8.3.0` — DoS via sequential optional groups (CVE-2026-4926) | override `path-to-regexp: >=8.4.0` |
+| HIGH | Dependency | `picomatch@2.3.1 & 4.0.3` — ReDoS via extglob (CVE-2026-33671) | override `picomatch: >=4.0.4` |
+| MODERATE | Dependency | `lodash@4.17.23` — Prototype Pollution (CVE-2026-2950) | included in lodash override |
+| MODERATE | Dependency | `brace-expansion@2.0.2` — process hang on zero-step (CVE-2026-33750) | override `brace-expansion: >=2.0.3` |
+| MODERATE | Dependency | `postcss@8.5.8` — XSS via unescaped `</style>` (CVE-2026-41305) | override `postcss: >=8.5.10` |
+| MODERATE | Dependency | `yaml@2.8.2` — Stack Overflow in deeply-nested YAML (CVE-2026-33532) | override `yaml: >=2.8.3` |
+| MEDIUM | SAST | `mockup-sandbox/App.tsx` — dynamic object lookup with URL-derived key | Path sanitized with `/^[\w/-]+$/` before use as module key |
+
+### Production Deployment Checklist (Security)
+
+```
+API_INTERNAL_TOKEN=<32+ char random secret>   # Enables system-actor protection
+ALLOWED_ORIGINS=https://your-app.replit.app   # Locks CORS to known domains
+LOG_LEVEL=info                                 # Avoid debug log leakage
+NODE_ENV=production                            # Removes dev error detail exposure
+```
+
+### Key Security Files
+
+- `artifacts/api-server/src/lib/actorContext.ts` — `resolveActor()` with privilege-escalation guard
+- `artifacts/api-server/src/app.ts` — CORS allowlist, rate limiter, global error handler
+- `artifacts/api-server/src/lib/audit.ts` — try/catch on every audit write; failures logged, never surfaced
+- `pnpm-workspace.yaml` — CVE overrides section
 
 ## Phase 4 Production Hardening Summary
 

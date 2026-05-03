@@ -36,6 +36,12 @@ function PreviewRenderer({
     setError(null);
 
     async function loadComponent(): Promise<void> {
+      // Sanitize: allow only alphanumeric, hyphen, underscore, and forward-slash.
+      // This prevents path traversal / prototype pollution via crafted component names.
+      if (!/^[\w/-]+$/.test(componentPath)) {
+        setError(`Invalid component path: ${componentPath}`);
+        return;
+      }
       const key = `./components/mockups/${componentPath}.tsx`;
       const loader = modules[key];
       if (!loader) {
