@@ -24,7 +24,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("[ErrorBoundary] React rendering error:", error, errorInfo);
     this.setState({ errorInfo });
   }
 
