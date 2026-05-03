@@ -18,7 +18,8 @@ router.use(requireActiveTenant);
 router.post("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { workspaceId } = req.params;
+    const params = req.params as Record<string, string>;
+    const workspaceId = params["workspaceId"]!;
     const { name, slug, type, metadata } = req.body as {
       name?: string;
       slug?: string;
@@ -97,7 +98,8 @@ router.post("/", async (req, res, next) => {
 router.get("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { workspaceId } = req.params;
+    const params = req.params as Record<string, string>;
+    const workspaceId = params["workspaceId"]!;
     const type = req.query["type"] as string | undefined;
     const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
     const offset = Number(req.query["offset"] ?? 0);
@@ -136,7 +138,9 @@ router.get("/", async (req, res, next) => {
 router.get("/:environmentId", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { workspaceId, environmentId } = req.params;
+    const params = req.params as Record<string, string>;
+    const workspaceId = params["workspaceId"]!;
+    const environmentId = params["environmentId"]!;
 
     const [environment] = await db
       .select()
@@ -163,7 +167,9 @@ router.get("/:environmentId", async (req, res, next) => {
 router.patch("/:environmentId", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { workspaceId, environmentId } = req.params;
+    const params = req.params as Record<string, string>;
+    const workspaceId = params["workspaceId"]!;
+    const environmentId = params["environmentId"]!;
     const { name, status, metadata } = req.body as {
       name?: string;
       status?: string;

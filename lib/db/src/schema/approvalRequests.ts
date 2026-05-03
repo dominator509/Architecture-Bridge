@@ -1,3 +1,10 @@
+/**
+ * ApprovalRequest — platform-primitive approval gate.
+ *
+ * Phase 3: actionLedgerEntryId links back to the act_ entry that was
+ * suspended pending this approval. When a decision is recorded, the
+ * action ledger entry is updated accordingly.
+ */
 import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -20,6 +27,7 @@ export const approvalRequestsTable = pgTable(
       .default("pending"),
     requesterId: text("requester_id").notNull(),
     reviewerId: text("reviewer_id"),
+    actionLedgerEntryId: text("action_ledger_entry_id"),
     requestPayload: jsonb("request_payload").$type<Record<string, unknown>>(),
     decisionPayload: jsonb("decision_payload").$type<Record<string, unknown>>(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
@@ -35,6 +43,7 @@ export const approvalRequestsTable = pgTable(
     index("approval_requests_tenant_id_idx").on(t.tenantId),
     index("approval_requests_status_idx").on(t.status),
     index("approval_requests_resource_idx").on(t.resourceType, t.resourceId),
+    index("approval_requests_requester_id_idx").on(t.requesterId),
   ],
 );
 

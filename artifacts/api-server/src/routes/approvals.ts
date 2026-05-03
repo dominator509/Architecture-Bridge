@@ -1,5 +1,16 @@
+/**
+ * Approvals router.
+ *
+ * Phase 3 hardening on POST /:approvalId/decision:
+ *   1. Self-approval prevention: reviewerId must differ from requesterId.
+ *      A self-approve attempt emits an audit event and returns 403.
+ *   2. On approved/rejected decision: updates the linked action_ledger entry
+ *      (via actionLedgerEntryId) to "approved" or "cancelled".
+ *   3. Emits audit event for every decision (including failed self-approve).
+ */
+
 import { Router, type IRouter } from "express";
-import { db, approvalRequestsTable } from "@workspace/db";
+import { db, approvalRequestsTable, actionLedgerTable } from "@workspace/db";
 import { eq, and, count, desc } from "drizzle-orm";
 import { newApprovalRequestId } from "../lib/ids";
 import { emitAuditEvent, auditEventTypes } from "../lib/audit";
@@ -10,28 +21,34 @@ import {
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
-const SYSTEM_ACTOR = { actorId: "system", actorType: "system" as const };
 
 router.use(resolveTenantContext);
 router.use(requireActiveTenant);
 
+// ── POST /tenants/:tenantId/approvals ──────────────────────────────────────────
 router.post("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { resourceType, resourceId, action, requesterId, requestPayload, expiresAt } =
-      req.body as {
-        resourceType?: string;
-        resourceId?: string;
-        action?: string;
-        requesterId?: string;
-        requestPayload?: Record<string, unknown>;
-        expiresAt?: string;
-      };
+    const {
+      resourceType,
+      resourceId,
+      action,
+      requesterId,
+      requestPayload,
+      expiresAt,
+    } = req.body as {
+      resourceType?: string;
+      resourceId?: string;
+      action?: string;
+      requesterId?: string;
+      requestPayload?: Record<string, unknown>;
+      expiresAt?: string;
+    };
 
     if (!resourceType || !resourceId || !action || !requesterId) {
-      res
-        .status(400)
-        .json({ error: "resourceType, resourceId, action, and requesterId are required" });
+      res.status(400).json({
+        error: "resourceType, resourceId, action, and requesterId are required",
+      });
       return;
     }
 
@@ -67,6 +84,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
+// ── GET /tenants/:tenantId/approvals ───────────────────────────────────────────
 router.get("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
@@ -109,6 +127,7 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+// ── GET /tenants/:tenantId/approvals/:approvalId ───────────────────────────────
 router.get("/:approvalId", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
@@ -135,6 +154,8 @@ router.get("/:approvalId", async (req, res, next) => {
   }
 });
 
+// ── POST /tenants/:tenantId/approvals/:approvalId/decision ────────────────────
+// Phase 3: self-approval prevention + action ledger update on decision.
 router.post("/:approvalId/decision", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
@@ -146,12 +167,16 @@ router.post("/:approvalId/decision", async (req, res, next) => {
     };
 
     if (!decision || !reviewerId) {
-      res.status(400).json({ error: "decision and reviewerId are required" });
+      res
+        .status(400)
+        .json({ error: "decision and reviewerId are required" });
       return;
     }
 
     if (decision !== "approved" && decision !== "rejected") {
-      res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
+      res
+        .status(400)
+        .json({ error: "decision must be 'approved' or 'rejected'" });
       return;
     }
 
@@ -178,6 +203,32 @@ router.post("/:approvalId/decision", async (req, res, next) => {
       return;
     }
 
+    // ── Phase 3: Self-approval prevention ──────────────────────────────────────
+    if (reviewerId === existing.requesterId) {
+      await emitAuditEvent({
+        tenantId,
+        actorId: reviewerId,
+        actorType: "user",
+        eventType: AET.approval.selfApproveAttempted,
+        resourceType: "approval_request",
+        resourceId: approvalId,
+        payload: {
+          reviewerId,
+          requesterId: existing.requesterId,
+          action: existing.action,
+          resourceType: existing.resourceType,
+          resourceId: existing.resourceId,
+        },
+      });
+
+      res.status(403).json({
+        error: "Self-approval is not permitted",
+        code: "SELF_APPROVAL_DENIED",
+        requesterId: existing.requesterId,
+      });
+      return;
+    }
+
     const now = new Date();
     const [updated] = await db
       .update(approvalRequestsTable)
@@ -191,6 +242,34 @@ router.post("/:approvalId/decision", async (req, res, next) => {
       .where(eq(approvalRequestsTable.id, approvalId))
       .returning();
 
+    // ── Phase 3: Update linked action ledger entry ─────────────────────────────
+    if (existing.actionLedgerEntryId) {
+      const ledgerStatus =
+        decision === "approved" ? "approved" : "cancelled";
+      await db
+        .update(actionLedgerTable)
+        .set({
+          status: ledgerStatus,
+          completedAt: now,
+          responsePayload: {
+            decision,
+            reviewerId,
+            decidedAt: now.toISOString(),
+          },
+        })
+        .where(eq(actionLedgerTable.id, existing.actionLedgerEntryId));
+
+      await emitAuditEvent({
+        tenantId,
+        actorId: reviewerId,
+        actorType: "user",
+        eventType: AET.actionLedger.written,
+        resourceType: "action_ledger_entry",
+        resourceId: existing.actionLedgerEntryId,
+        payload: { status: ledgerStatus, approvalId },
+      });
+    }
+
     await emitAuditEvent({
       tenantId,
       actorId: reviewerId,
@@ -198,7 +277,12 @@ router.post("/:approvalId/decision", async (req, res, next) => {
       eventType: AET.approval.decided,
       resourceType: "approval_request",
       resourceId: approvalId,
-      payload: { decision, resourceType: existing.resourceType, resourceId: existing.resourceId },
+      payload: {
+        decision,
+        resourceType: existing.resourceType,
+        resourceId: existing.resourceId,
+        actionLedgerEntryId: existing.actionLedgerEntryId,
+      },
     });
 
     res.json(updated);

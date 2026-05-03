@@ -8,3 +8,4 @@ export * from "./configSnapshots";
 export * from "./auditEvents";
 export * from "./actionLedger";
 export * from "./approvalRequests";
+export * from "./policyDecisions";

@@ -7,6 +7,9 @@
  * All tenant-mutating API routes call this after a successful write.
  * The event is fire-and-forget: failures are logged but never surface to the
  * caller so they don't disrupt the primary operation.
+ *
+ * Phase 3 additions: policy decision events, action ledger events,
+ * approval decision events (including self-approve attempts).
  */
 
 import { db, auditEventsTable } from "@workspace/db";
@@ -67,6 +70,8 @@ export function auditEventTypes() {
     deployment: {
       created: "deployment.created",
       updated: "deployment.updated",
+      blocked: "deployment.blocked",
+      approvalRequired: "deployment.approval_required",
     },
     configSnapshot: {
       resolved: "config_snapshot.resolved",
@@ -74,6 +79,13 @@ export function auditEventTypes() {
     approval: {
       created: "approval.created",
       decided: "approval.decided",
+      selfApproveAttempted: "approval.self_approve_attempted",
+    },
+    policyDecision: {
+      stored: "policy_decision.stored",
+    },
+    actionLedger: {
+      written: "action_ledger.written",
     },
     policy: {
       evaluated: "policy.evaluated",

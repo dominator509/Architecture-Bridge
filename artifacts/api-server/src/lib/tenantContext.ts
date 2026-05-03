@@ -25,7 +25,8 @@ export function resolveTenantContext(
   res: Response,
   next: NextFunction,
 ): void {
-  const tenantId = req.params["tenantId"];
+  const raw = req.params["tenantId"];
+  const tenantId = Array.isArray(raw) ? raw[0] : raw;
   if (!tenantId) {
     res.status(400).json({ error: "tenantId path parameter is required" });
     return;

@@ -1,3 +1,10 @@
+/**
+ * Action Ledger router.
+ *
+ * Phase 3: status filter expanded to include new lifecycle values
+ * (attempted, blocked, approval_required, approved, executed, cancelled, failed).
+ */
+
 import { Router, type IRouter } from "express";
 import { db, actionLedgerTable } from "@workspace/db";
 import { eq, and, count, gte, desc } from "drizzle-orm";
@@ -11,15 +18,14 @@ const router: IRouter = Router({ mergeParams: true });
 router.use(resolveTenantContext);
 router.use(requireActiveTenant);
 
+// ── GET /tenants/:tenantId/action-ledger ──────────────────────────────────────
 router.get("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const {
-      deploymentId,
-      actorId,
-      status,
-      since,
-    } = req.query as Record<string, string | undefined>;
+    const { deploymentId, actorId, status, since } = req.query as Record<
+      string,
+      string | undefined
+    >;
     const limit = Math.min(Number(req.query["limit"] ?? 100), 500);
     const offset = Number(req.query["offset"] ?? 0);
 
@@ -31,7 +37,14 @@ router.get("/", async (req, res, next) => {
       conditions.push(
         eq(
           actionLedgerTable.status,
-          status as "pending" | "succeeded" | "failed" | "cancelled",
+          status as
+            | "attempted"
+            | "blocked"
+            | "approval_required"
+            | "approved"
+            | "executed"
+            | "cancelled"
+            | "failed",
         ),
       );
     if (since)

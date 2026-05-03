@@ -10,15 +10,27 @@ import { describe, it, expect } from "vitest";
 import { evaluatePolicy } from "../lib/policy";
 
 describe("Default-deny policy engine", () => {
-  it("denies user principal with no matching rule", () => {
+  it("denies user principal with no matching rule (default deny)", () => {
+    // Use an action that has no Phase 3 rule so default deny fires.
     const result = evaluatePolicy({
       principal: { id: "user-1", type: "user" },
-      action: "deployment:create",
-      resource: { type: "deployment", id: "dep_xyz" },
+      action: "workspace:delete",
+      resource: { type: "workspace", id: "wrk_xyz" },
     });
     expect(result.allowed).toBe(false);
     expect(result.matchedRule).toBeNull();
     expect(result.reason).toMatch(/default deny/i);
+  });
+
+  it("user + deployment:create → require_approval (Phase 3 rule)", () => {
+    const result = evaluatePolicy({
+      principal: { id: "user-1", type: "user" },
+      action: "deployment:create",
+      resource: { type: "environment", id: "env_xyz" },
+    });
+    expect(result.outcome).toBe("require_approval");
+    expect(result.allowed).toBe(false);
+    expect(result.matchedRule).toBe("user.deployment_create.require_approval");
   });
 
   it("denies agent principal with no matching rule", () => {

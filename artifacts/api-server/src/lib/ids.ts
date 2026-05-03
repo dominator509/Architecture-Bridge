@@ -13,6 +13,8 @@
  *   aud_  — AuditEvent
  *   act_  — ActionLedgerEntry
  *   apr_  — ApprovalRequest
+ *   aprd_ — ApprovalDecision (audit reference)
+ *   pdec_ — PolicyDecision
  */
 
 import { customAlphabet } from "nanoid";
@@ -34,3 +36,5 @@ export const newConfigSnapshotId = () => prefixed("cfg");
 export const newAuditEventId = () => prefixed("aud");
 export const newActionLedgerId = () => prefixed("act");
 export const newApprovalRequestId = () => prefixed("apr");
+export const newApprovalDecisionId = () => prefixed("aprd");
+export const newPolicyDecisionId = () => prefixed("pdec");
