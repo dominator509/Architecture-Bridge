@@ -944,4 +944,6 @@ export const GetTenantSummaryResponse = zod.object({
   activeDeploymentCount: zod.number(),
   pendingApprovalCount: zod.number(),
   recentAuditEventCount: zod.number(),
+  policyDecisionCount: zod.number(),
+  actionLedgerEntryCount: zod.number(),
 });

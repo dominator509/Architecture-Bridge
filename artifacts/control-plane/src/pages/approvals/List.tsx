@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { useParams } from "wouter";
-import { 
-  useListApprovalRequests, getListApprovalRequestsQueryKey, 
-  useCreateApprovalRequest, 
+import {
+  useListApprovalRequests, getListApprovalRequestsQueryKey,
+  useCreateApprovalRequest,
   useSubmitApprovalDecision
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, ShieldCheck, Check, X } from "lucide-react";
+import { Plus, ShieldCheck, Check, X, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,10 @@ export default function ApprovalList() {
   const [resourceType, setResourceType] = useState("deployment");
   const [resourceId, setResourceId] = useState("");
   const [action, setAction] = useState("promote");
-  const [requesterId, setRequesterId] = useState("usr_test123");
+  const [requesterId, setRequesterId] = useState("usr_requester_001");
+
+  const [decisionTarget, setDecisionTarget] = useState<{ id: string; decision: "approved" | "rejected" } | null>(null);
+  const [reviewerId, setReviewerId] = useState("reviewer_001");
 
   const { data, isLoading } = useListApprovalRequests(tenantId, {}, {
     query: {
@@ -48,15 +51,24 @@ export default function ApprovalList() {
     );
   };
 
-  const handleDecision = (id: string, decision: "approved" | "rejected") => {
+  const handleDecisionSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!decisionTarget) return;
     decisionMutation.mutate(
-      { tenantId, approvalId: id, data: { decision, reviewerId: "admin_123" } },
+      { tenantId, approvalId: decisionTarget.id, data: { decision: decisionTarget.decision, reviewerId } },
       {
         onSuccess: () => {
+          setDecisionTarget(null);
           queryClient.invalidateQueries({ queryKey: getListApprovalRequestsQueryKey(tenantId, {}) });
         }
       }
     );
+  };
+
+  const statusVariant = (status: string) => {
+    if (status === "approved") return "default";
+    if (status === "rejected") return "destructive";
+    return "secondary";
   };
 
   return (
@@ -119,28 +131,49 @@ export default function ApprovalList() {
                 <th className="px-6 py-3 font-medium text-muted-foreground">Resource</th>
                 <th className="px-6 py-3 font-medium text-muted-foreground">Action</th>
                 <th className="px-6 py-3 font-medium text-muted-foreground">Status</th>
+                <th className="px-6 py-3 font-medium text-muted-foreground">Linked</th>
                 <th className="px-6 py-3 font-medium text-muted-foreground text-right">Decision</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {data?.items.map(a => (
                 <tr key={a.id} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4 font-mono font-medium">{a.id}</td>
+                  <td className="px-6 py-4 font-mono font-medium text-sm">{a.id}</td>
                   <td className="px-6 py-4">
                     <div className="font-medium">{a.resourceType}</div>
                     <div className="text-xs text-muted-foreground font-mono">{a.resourceId}</div>
                   </td>
                   <td className="px-6 py-4">{a.action}</td>
                   <td className="px-6 py-4">
-                    <Badge variant={a.status === 'approved' ? 'default' : a.status === 'rejected' ? 'destructive' : 'secondary'}>{a.status}</Badge>
+                    <Badge variant={statusVariant(a.status)}>{a.status}</Badge>
+                  </td>
+                  <td className="px-6 py-4">
+                    {a.actionLedgerEntryId ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-amber-400 font-mono" title={a.actionLedgerEntryId}>
+                        <Link2 className="h-3 w-3" />
+                        {a.actionLedgerEntryId.slice(0, 12)}…
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-right">
                     {a.status === 'pending' && (
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="outline" className="text-green-600 border-green-600/30 hover:bg-green-600/10" onClick={() => handleDecision(a.id, 'approved')}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-green-600 border-green-600/30 hover:bg-green-600/10"
+                          onClick={() => setDecisionTarget({ id: a.id, decision: "approved" })}
+                        >
                           <Check className="h-4 w-4 mr-1" /> Approve
                         </Button>
-                        <Button size="sm" variant="outline" className="text-red-600 border-red-600/30 hover:bg-red-600/10" onClick={() => handleDecision(a.id, 'rejected')}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 border-red-600/30 hover:bg-red-600/10"
+                          onClick={() => setDecisionTarget({ id: a.id, decision: "rejected" })}
+                        >
                           <X className="h-4 w-4 mr-1" /> Reject
                         </Button>
                       </div>
@@ -152,6 +185,47 @@ export default function ApprovalList() {
           </table>
         </div>
       )}
+
+      <Dialog open={!!decisionTarget} onOpenChange={open => { if (!open) setDecisionTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {decisionTarget?.decision === "approved" ? "Approve" : "Reject"} Request
+            </DialogTitle>
+            <DialogDescription>
+              Provide your reviewer ID. It must differ from the requester to prevent self-approval.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleDecisionSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Reviewer ID</Label>
+              <Input
+                value={reviewerId}
+                onChange={e => setReviewerId(e.target.value)}
+                placeholder="reviewer_001"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Must be different from the requester ID to prevent self-approval.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDecisionTarget(null)}>Cancel</Button>
+              <Button
+                type="submit"
+                disabled={decisionMutation.isPending}
+                variant={decisionTarget?.decision === "approved" ? "default" : "destructive"}
+              >
+                {decisionMutation.isPending
+                  ? "Submitting..."
+                  : decisionTarget?.decision === "approved"
+                  ? "Confirm Approve"
+                  : "Confirm Reject"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

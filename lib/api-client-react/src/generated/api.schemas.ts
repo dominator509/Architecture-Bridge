@@ -76,6 +76,8 @@ export interface TenantSummary {
   activeDeploymentCount: number;
   pendingApprovalCount: number;
   recentAuditEventCount: number;
+  policyDecisionCount: number;
+  actionLedgerEntryCount: number;
 }
 
 export type WorkspaceStatus =

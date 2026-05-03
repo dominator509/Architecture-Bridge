@@ -48,9 +48,9 @@ lib/
 ## Key Architecture Invariants
 
 1. **Tenant isolation**: Every resource carries `tenantId`; all queries filter by it. Cross-tenant reads return 404.
-2. **Default-deny policy**: `evaluatePolicy()` in `lib/policy.ts` is the ONLY place policy decisions are made. Phase 3 rules: system → allow; user + deployment:create → require_approval; agent + deployment:create → deny; unmatched → deny.
+2. **Default-deny policy**: `evaluatePolicy()` in `lib/policy.ts` is the ONLY place policy decisions are made. Phase 3 rules: system → allow; user + deployment:create → require_approval; agent + deployment:create → deny; user + deployment:status_update → require_approval; agent + deployment:status_update → deny; unmatched → deny.
 3. **Policy decision persistence**: Every `evaluatePolicy()` call on a protected mutation stores a `pdec_` row via `storePolicyDecision()`. Every interactive `POST /policy/evaluate` call also stores a `pdec_` row.
-4. **Protected mutations evaluate policy first**: `POST /environments/:envId/deployments` reads `X-Actor-Id`/`X-Actor-Type` headers, evaluates policy, writes `pdec_` + `act_`, then branches: allow → 201, deny → 403, require_approval → 202 + creates `apr_`.
+4. **Protected mutations evaluate policy first**: Both `POST /environments/:envId/deployments` and `PATCH /deployments/:id` (when status changes) read `X-Actor-Id`/`X-Actor-Type` headers, evaluate policy, write `pdec_` + `act_`, then branch: allow → proceed, deny → 403, require_approval → 202 + creates `apr_`. Metadata-only PATCH updates bypass the gate.
 5. **Action ledger lifecycle**: `act_` entries progress through: attempted → blocked | approval_required | executed. Approval decisions transition approval_required → approved | cancelled.
 6. **Approval gating**: When policy returns `require_approval`, an `apr_` record is created and execution halts at 202 until an authorized decision is recorded. The `apr_` links back to the `act_` via `actionLedgerEntryId`.
 7. **Self-approval prevention**: `POST /approvals/:id/decision` rejects with 403/SELF_APPROVAL_DENIED if `reviewerId === requesterId`. The attempt is audited.
@@ -89,7 +89,7 @@ GET  /api/tenants/:tenantId/deployments
 POST /api/tenants/:tenantId/environments/:environmentId/deployments  ← Phase 3 protected
 GET  /api/tenants/:tenantId/environments/:environmentId/deployments
 GET  /api/tenants/:tenantId/deployments/:deploymentId
-PATCH /api/tenants/:tenantId/deployments/:deploymentId
+PATCH /api/tenants/:tenantId/deployments/:deploymentId              ← Phase 3 protected (status transitions)
 POST /api/tenants/:tenantId/deployments/:deploymentId/config-snapshot
 GET  /api/tenants/:tenantId/deployments/:deploymentId/config-snapshot
 
@@ -187,18 +187,19 @@ The database is seeded with sample data under tenant `ten_SeedDemo0000000000001`
 
 ## UI Pages
 
-All 12 pages are fully connected to live API data via generated hooks:
+All 13 pages are fully connected to live API data via generated hooks:
 
 | Page | Path | Notes |
 |------|------|-------|
 | Tenant List | `/` | Grid of tenant cards |
-| Tenant Overview | `/tenants/:id` | Summary stats dashboard |
+| Tenant Overview | `/tenants/:id` | 8-stat dashboard (incl. Phase 3 counts) |
 | Workspaces | `/tenants/:id/workspaces` | List + create |
 | Workspace Detail | `/tenants/:id/workspaces/:wid` | Environments list |
 | Environment Detail | `/tenants/:id/workspaces/:wid/environments/:eid` | Deployments in env |
 | Packages | `/tenants/:id/packages` | List + create |
 | Package Detail | `/tenants/:id/packages/:pid` | Version list |
 | Deployments | `/tenants/:id/deployments` | Cross-env list |
-| Approvals | `/tenants/:id/approvals` | Pending + decision actions |
+| Approvals | `/tenants/:id/approvals` | Pending + decision actions; reviewer ID dialog; actionLedgerEntryId column |
 | Audit Log | `/tenants/:id/audit` | Immutable event stream |
-| Policy Playground | `/tenants/:id/policy` | Evaluate policy interactively |
+| Action Ledger | `/tenants/:id/action-ledger` | Status-filtered act_ evidence trail |
+| Policy | `/tenants/:id/policy` | Playground (4-outcome) + Decision History tabs |

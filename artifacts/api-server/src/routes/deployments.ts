@@ -402,6 +402,8 @@ router.get("/deployments/:deploymentId", async (req, res, next) => {
 });
 
 // ── PATCH /tenants/:tenantId/deployments/:deploymentId ────────────────────────
+// Phase 3 hardening: status transitions are policy-gated.
+// Metadata-only updates bypass the policy gate (non-sensitive change).
 router.patch("/deployments/:deploymentId", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
@@ -411,6 +413,199 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
       metadata?: Record<string, unknown>;
     };
 
+    // ── Actor identity from request headers (default: system) ────────────────
+    const rawActorType = (req.headers["x-actor-type"] as string) || "system";
+    const actorType: "user" | "agent" | "system" = (
+      ["user", "agent", "system"] as const
+    ).includes(rawActorType as "user" | "agent" | "system")
+      ? (rawActorType as "user" | "agent" | "system")
+      : "system";
+    const actorId = (req.headers["x-actor-id"] as string) || "system";
+
+    // ── Fetch existing deployment (needed for policy gate + audit delta) ─────
+    const [existing] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(
+        and(
+          eq(deploymentsTable.id, deploymentId),
+          eq(deploymentsTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ error: "Deployment not found" });
+      return;
+    }
+
+    // ── Policy gate: only for status transitions, not metadata-only updates ──
+    if (status !== undefined && status !== existing.status) {
+      const policyResult = evaluatePolicy({
+        principal: { id: actorId, type: actorType },
+        action: "deployment:status_update",
+        resource: { type: "deployment", id: deploymentId },
+      });
+
+      const policyDecisionId = await storePolicyDecision({
+        tenantId,
+        principal: { id: actorId, type: actorType },
+        action: "deployment:status_update",
+        resource: { type: "deployment", id: deploymentId },
+        result: policyResult,
+        context: { fromStatus: existing.status, toStatus: status },
+      });
+
+      await emitAuditEvent({
+        tenantId,
+        actorId,
+        actorType,
+        eventType: AET.policyDecision.stored,
+        resourceType: "policy_decision",
+        resourceId: policyDecisionId,
+        payload: {
+          action: "deployment:status_update",
+          outcome: policyResult.outcome,
+          matchedRule: policyResult.matchedRule,
+        },
+      });
+
+      const actionLedgerId = newActionLedgerId();
+      await db.insert(actionLedgerTable).values({
+        id: actionLedgerId,
+        tenantId,
+        actionType: "deployment:status_update",
+        actorId,
+        actorType,
+        status: "attempted",
+        policyDecisionId,
+        deploymentId,
+        requestPayload: {
+          deploymentId,
+          fromStatus: existing.status,
+          toStatus: status,
+        },
+      });
+
+      await emitAuditEvent({
+        tenantId,
+        actorId,
+        actorType,
+        eventType: AET.actionLedger.written,
+        resourceType: "action_ledger_entry",
+        resourceId: actionLedgerId,
+        payload: { actionType: "deployment:status_update", status: "attempted" },
+      });
+
+      // DENY
+      if (policyResult.outcome === "deny") {
+        await db
+          .update(actionLedgerTable)
+          .set({ status: "blocked", completedAt: new Date() })
+          .where(eq(actionLedgerTable.id, actionLedgerId));
+
+        await emitAuditEvent({
+          tenantId,
+          actorId,
+          actorType,
+          eventType: AET.deployment.statusUpdateBlocked,
+          resourceType: "deployment",
+          resourceId: deploymentId,
+          payload: {
+            reason: policyResult.reason,
+            policyDecisionId,
+            actionLedgerEntryId: actionLedgerId,
+          },
+        });
+
+        res.status(403).json({
+          error: "Policy denied",
+          code: "POLICY_DENIED",
+          reason: policyResult.reason,
+          matchedRule: policyResult.matchedRule,
+          policyDecisionId,
+          actionLedgerEntryId: actionLedgerId,
+        });
+        return;
+      }
+
+      // REQUIRE_APPROVAL or REQUIRE_ESCALATION
+      if (
+        policyResult.outcome === "require_approval" ||
+        policyResult.outcome === "require_escalation"
+      ) {
+        const approvalId = newApprovalRequestId();
+        const [approvalRequest] = await db
+          .insert(approvalRequestsTable)
+          .values({
+            id: approvalId,
+            tenantId,
+            resourceType: "deployment",
+            resourceId: deploymentId,
+            action: "deployment:status_update",
+            requesterId: actorId,
+            requestPayload: {
+              fromStatus: existing.status,
+              toStatus: status,
+              metadata: metadata ?? {},
+            },
+            actionLedgerEntryId: actionLedgerId,
+            status: "pending",
+          })
+          .returning();
+
+        await db
+          .update(actionLedgerTable)
+          .set({ status: "approval_required", approvalRequestId: approvalId })
+          .where(eq(actionLedgerTable.id, actionLedgerId));
+
+        await emitAuditEvent({
+          tenantId,
+          actorId,
+          actorType,
+          eventType: AET.deployment.statusUpdateApprovalRequired,
+          resourceType: "approval_request",
+          resourceId: approvalId,
+          payload: {
+            outcome: policyResult.outcome,
+            deploymentId,
+            fromStatus: existing.status,
+            toStatus: status,
+            policyDecisionId,
+            actionLedgerEntryId: actionLedgerId,
+          },
+        });
+
+        res.status(202).json({
+          message:
+            policyResult.outcome === "require_escalation"
+              ? "Escalation required before status update can proceed"
+              : "Approval required before status update can proceed",
+          outcome: policyResult.outcome,
+          approvalRequestId: approvalId,
+          approvalRequest,
+          actionLedgerEntryId: actionLedgerId,
+          policyDecisionId,
+        });
+        return;
+      }
+
+      // ALLOW — mark act_ as executed before applying the update
+      await db
+        .update(actionLedgerTable)
+        .set({
+          status: "executed",
+          completedAt: new Date(),
+          responsePayload: {
+            deploymentId,
+            fromStatus: existing.status,
+            toStatus: status,
+          },
+        })
+        .where(eq(actionLedgerTable.id, actionLedgerId));
+    }
+
+    // ── Apply the update ─────────────────────────────────────────────────────
     const updates: Partial<typeof deploymentsTable.$inferInsert> = {
       updatedAt: new Date(),
     };
@@ -436,8 +631,9 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
 
     await emitAuditEvent({
       tenantId,
-      ...SYSTEM_ACTOR,
-      eventType: AET.deployment.updated,
+      actorId,
+      actorType,
+      eventType: AET.deployment.statusUpdated,
       resourceType: "deployment",
       resourceId: deploymentId,
       payload: updates,

@@ -9,7 +9,8 @@
  * caller so they don't disrupt the primary operation.
  *
  * Phase 3 additions: policy decision events, action ledger events,
- * approval decision events (including self-approve attempts).
+ * approval decision events (including self-approve attempts),
+ * deployment status-update policy events.
  */
 
 import { db, auditEventsTable } from "@workspace/db";
@@ -72,6 +73,9 @@ export function auditEventTypes() {
       updated: "deployment.updated",
       blocked: "deployment.blocked",
       approvalRequired: "deployment.approval_required",
+      statusUpdated: "deployment.status_updated",
+      statusUpdateBlocked: "deployment.status_update_blocked",
+      statusUpdateApprovalRequired: "deployment.status_update_approval_required",
     },
     configSnapshot: {
       resolved: "config_snapshot.resolved",

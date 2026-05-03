@@ -11,6 +11,8 @@ import {
   deploymentsTable,
   approvalRequestsTable,
   auditEventsTable,
+  policyDecisionsTable,
+  actionLedgerTable,
 } from "@workspace/db";
 
 const router: IRouter = Router();
@@ -165,6 +167,8 @@ router.get("/tenants/:tenantId/summary", async (req, res, next) => {
       [{ activeDeploymentCount }],
       [{ pendingApprovalCount }],
       [{ recentAuditEventCount }],
+      [{ policyDecisionCount }],
+      [{ actionLedgerEntryCount }],
     ] = await Promise.all([
       db
         .select({ workspaceCount: count() })
@@ -205,6 +209,14 @@ router.get("/tenants/:tenantId/summary", async (req, res, next) => {
             sql`${auditEventsTable.createdAt} > now() - interval '24 hours'`,
           ),
         ),
+      db
+        .select({ policyDecisionCount: count() })
+        .from(policyDecisionsTable)
+        .where(eq(policyDecisionsTable.tenantId, tenantId)),
+      db
+        .select({ actionLedgerEntryCount: count() })
+        .from(actionLedgerTable)
+        .where(eq(actionLedgerTable.tenantId, tenantId)),
     ]);
 
     res.json({
@@ -215,6 +227,8 @@ router.get("/tenants/:tenantId/summary", async (req, res, next) => {
       activeDeploymentCount: Number(activeDeploymentCount),
       pendingApprovalCount: Number(pendingApprovalCount),
       recentAuditEventCount: Number(recentAuditEventCount),
+      policyDecisionCount: Number(policyDecisionCount),
+      actionLedgerEntryCount: Number(actionLedgerEntryCount),
     });
   } catch (err) {
     next(err);

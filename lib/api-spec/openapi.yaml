@@ -1143,6 +1143,10 @@ components:
           type: integer
         recentAuditEventCount:
           type: integer
+        policyDecisionCount:
+          type: integer
+        actionLedgerEntryCount:
+          type: integer
       required:
         - tenantId
         - workspaceCount
@@ -1151,6 +1155,8 @@ components:
         - activeDeploymentCount
         - pendingApprovalCount
         - recentAuditEventCount
+        - policyDecisionCount
+        - actionLedgerEntryCount
 
     # ── Workspace ─────────────────────────────────────────────────────────────
     Workspace:

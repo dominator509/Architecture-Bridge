@@ -14,6 +14,7 @@ import PackageDetail from "@/pages/packages/Detail";
 import DeploymentList from "@/pages/deployments/List";
 import ApprovalList from "@/pages/approvals/List";
 import AuditList from "@/pages/audit/List";
+import ActionLedgerList from "@/pages/action-ledger/List";
 import PolicyPlayground from "@/pages/policy/Playground";
 import { TenantLayout } from "@/components/layout/TenantLayout";
 
@@ -45,7 +46,10 @@ function TenantRoutes() {
           {/* Audit Log */}
           <Route path="/audit" component={AuditList} />
 
-          {/* Policy Playground */}
+          {/* Action Ledger */}
+          <Route path="/action-ledger" component={ActionLedgerList} />
+
+          {/* Policy (Playground + Decision History) */}
           <Route path="/policy" component={PolicyPlayground} />
 
           <Route component={NotFound} />

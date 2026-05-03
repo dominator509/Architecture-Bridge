@@ -12,11 +12,15 @@
  *   require_escalation — action requires escalation to a higher authority
  *
  * Phase 3 static rules (evaluated in priority order, first match wins):
- *   1. system.full_access            — system principal → allow (any action, any resource)
+ *   1. system.full_access              — system principal → allow (any action, any resource)
  *   2. user.deployment_create.require_approval
- *                                    — user + deployment:create → require_approval
- *   3. agent.deployment_create.deny  — agent + deployment:create → deny
- *   Default (no match)               — deny
+ *                                      — user + deployment:create → require_approval
+ *   3. agent.deployment_create.deny    — agent + deployment:create → deny
+ *   4. user.deployment_status_update.require_approval
+ *                                      — user + deployment:status_update → require_approval
+ *   5. agent.deployment_status_update.deny
+ *                                      — agent + deployment:status_update → deny
+ *   Default (no match)                 — deny
  *
  * FUTURE PHASE — NOT IMPLEMENTED:
  *   - Tenant-configured rule sets stored in DB
@@ -102,6 +106,20 @@ const PHASE3_RULES: Phase3Rule[] = [
     resourceType: null,
     outcome: "deny",
     ruleName: "agent.deployment_create.deny",
+  },
+  {
+    principalType: "user",
+    action: "deployment:status_update",
+    resourceType: null,
+    outcome: "require_approval",
+    ruleName: "user.deployment_status_update.require_approval",
+  },
+  {
+    principalType: "agent",
+    action: "deployment:status_update",
+    resourceType: null,
+    outcome: "deny",
+    ruleName: "agent.deployment_status_update.deny",
   },
 ];
 
