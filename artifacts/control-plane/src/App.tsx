@@ -73,7 +73,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={TenantList} />
-      <Route path="/tenants/:tenantId/*?" component={TenantRoutes} />
+      <Route path="/tenants/:tenantId" component={TenantRoutes} />
+      <Route path="/tenants/:tenantId/*" component={TenantRoutes} />
       <Route component={NotFound} />
     </Switch>
   );
