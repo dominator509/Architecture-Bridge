@@ -34,6 +34,12 @@ import {
 import { emitAuditEvent, auditEventTypes } from "../lib/audit";
 import { evaluatePolicy, storePolicyDecision } from "../lib/policy";
 import {
+  CreateDeploymentBody,
+  UpdateDeploymentBody,
+  CreateConfigSnapshotBody,
+  parseBody,
+} from "../lib/validation";
+import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
@@ -89,15 +95,9 @@ router.post(
     try {
       const tenantId = res.locals.tenantId!;
       const { environmentId } = req.params;
-      const { packageVersionId, metadata } = req.body as {
-        packageVersionId?: string;
-        metadata?: Record<string, unknown>;
-      };
-
-      if (!packageVersionId) {
-        res.status(400).json({ error: "packageVersionId is required" });
-        return;
-      }
+      const body = parseBody(CreateDeploymentBody, req.body, res);
+      if (!body) return;
+      const { packageVersionId, metadata } = body;
 
       // ── 1. Resolve actor identity from request headers ──────────────────────
       const rawActorType = (req.headers["x-actor-type"] as string) || "system";
@@ -408,10 +408,9 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
     const { deploymentId } = req.params;
-    const { status, metadata } = req.body as {
-      status?: string;
-      metadata?: Record<string, unknown>;
-    };
+    const body = parseBody(UpdateDeploymentBody, req.body, res);
+    if (!body) return;
+    const { status, metadata } = body;
 
     // ── Actor identity from request headers (default: system) ────────────────
     const rawActorType = (req.headers["x-actor-type"] as string) || "system";
@@ -653,10 +652,9 @@ router.post(
     try {
       const tenantId = res.locals.tenantId!;
       const { deploymentId } = req.params;
-      const { configOverrides, schemaVersion } = req.body as {
-        configOverrides?: Record<string, unknown>;
-        schemaVersion?: string;
-      };
+      const body = parseBody(CreateConfigSnapshotBody, req.body, res);
+      if (!body) return;
+      const { configOverrides, schemaVersion } = body;
 
       const [deployment] = await db
         .select()

@@ -11,6 +11,11 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import {
+  CreatePackageBody,
+  CreatePackageVersionBody,
+  parseBody,
+} from "../lib/validation";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -24,17 +29,9 @@ router.use(requireActiveTenant);
 router.post("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { name, slug, description, metadata } = req.body as {
-      name?: string;
-      slug?: string;
-      description?: string;
-      metadata?: Record<string, unknown>;
-    };
-
-    if (!name || !slug) {
-      res.status(400).json({ error: "name and slug are required" });
-      return;
-    }
+    const body = parseBody(CreatePackageBody, req.body, res);
+    if (!body) return;
+    const { name, slug, description, metadata } = body;
 
     const existing = await db
       .select({ id: packagesTable.id })
@@ -137,16 +134,10 @@ router.post("/:packageId/versions", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
     const { packageId } = req.params;
-    const { version, manifest, status } = req.body as {
-      version?: string;
-      manifest?: Record<string, unknown>;
-      status?: string;
-    };
 
-    if (!version || !manifest) {
-      res.status(400).json({ error: "version and manifest are required" });
-      return;
-    }
+    const body = parseBody(CreatePackageVersionBody, req.body, res);
+    if (!body) return;
+    const { version, manifest, status } = body;
 
     const [pkg] = await db
       .select({ id: packagesTable.id })
@@ -191,7 +182,7 @@ router.post("/:packageId/versions", async (req, res, next) => {
         tenantId,
         version,
         manifest,
-        status: (status as "draft" | "published") ?? "draft",
+        status,
       })
       .returning();
 

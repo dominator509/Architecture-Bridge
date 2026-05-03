@@ -7,18 +7,20 @@ import {
   useUpdateDeployment,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Activity, Play, Square, RefreshCcw } from "lucide-react";
+import { Plus, Activity, Play, Square, RefreshCcw, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
 
 export default function DeploymentList() {
   const params = useParams<{ tenantId: string }>();
   const tenantId = params.tenantId || "";
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [environmentId, setEnvironmentId] = useState("");
@@ -39,11 +41,35 @@ export default function DeploymentList() {
     createMutation.mutate(
       { tenantId, environmentId, data: { packageVersionId } },
       {
-        onSuccess: () => {
+        onSuccess: (result: any) => {
+          // Policy may have returned 202 (approval required) or 201 (created)
+          if (result?.outcome === "require_approval" || result?.approvalRequestId) {
+            toast({
+              title: "Approval required",
+              description: `Deployment creation requires approval. Request: ${result.approvalRequestId}`,
+            });
+          } else if (result?.outcome === "deny" || result?.code === "POLICY_DENIED") {
+            toast({
+              title: "Deployment blocked",
+              description: result?.reason ?? "Policy denied the deployment.",
+              variant: "destructive",
+            });
+          } else {
+            toast({ title: "Deployment created", description: `Deployment ${result?.id} is now pending.` });
+          }
           setIsCreateOpen(false);
           setEnvironmentId("");
           setPackageVersionId("");
           queryClient.invalidateQueries({ queryKey: getListAllDeploymentsQueryKey(tenantId, {}) });
+        },
+        onError: (err: any) => {
+          const body = err?.response?.data;
+          if (body?.code === "POLICY_DENIED") {
+            toast({ title: "Deployment blocked by policy", description: body.reason, variant: "destructive" });
+          } else {
+            const msg = body?.error ?? err?.message ?? "Unknown error";
+            toast({ title: "Failed to create deployment", description: msg, variant: "destructive" });
+          }
         },
       },
     );
@@ -53,8 +79,24 @@ export default function DeploymentList() {
     updateMutation.mutate(
       { tenantId, deploymentId: id, data: { status } },
       {
-        onSuccess: () => {
+        onSuccess: (result: any) => {
+          if (result?.outcome === "require_approval") {
+            toast({
+              title: "Approval required",
+              description: `Status change to "${status}" requires approval. Request: ${result.approvalRequestId}`,
+            });
+          } else {
+            toast({ title: "Status updated", description: `Deployment set to "${status}".` });
+          }
           queryClient.invalidateQueries({ queryKey: getListAllDeploymentsQueryKey(tenantId, {}) });
+        },
+        onError: (err: any) => {
+          const body = err?.response?.data;
+          if (body?.code === "POLICY_DENIED") {
+            toast({ title: "Status change blocked by policy", description: body.reason, variant: "destructive" });
+          } else {
+            toast({ title: "Failed to update status", description: body?.error ?? err?.message, variant: "destructive" });
+          }
         },
       },
     );
@@ -73,6 +115,12 @@ export default function DeploymentList() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create Deployment</DialogTitle>
+              <DialogDescription className="flex items-start gap-2 text-amber-500/90 bg-amber-500/10 border border-amber-500/20 rounded-md p-3 mt-2">
+                <Clock className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span className="text-sm">
+                  Deployment creation is policy-gated. Non-system actors require approval before the deployment is provisioned.
+                </span>
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="space-y-2">
@@ -97,10 +145,16 @@ export default function DeploymentList() {
                   data-testid="input-package-version-id"
                 />
               </div>
+              {createMutation.error && (
+                <div className="flex items-start gap-2 text-destructive text-sm">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{(createMutation.error as any)?.response?.data?.error ?? "An error occurred"}</span>
+                </div>
+              )}
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={createMutation.isPending} data-testid="button-submit-deployment">
-                  {createMutation.isPending ? "Creating..." : "Deploy"}
+                  {createMutation.isPending ? "Deploying..." : "Deploy"}
                 </Button>
               </DialogFooter>
             </form>
@@ -135,14 +189,14 @@ export default function DeploymentList() {
               {data?.items.map((d) => (
                 <tr key={d.id} className="hover:bg-muted/50 transition-colors" data-testid={`row-deployment-${d.id}`}>
                   <td className="px-6 py-4 font-mono font-medium text-primary">{d.id}</td>
-                  <td className="px-6 py-4 font-mono text-muted-foreground">{d.environmentId}</td>
-                  <td className="px-6 py-4 font-mono text-muted-foreground">{d.packageVersionId}</td>
+                  <td className="px-6 py-4 font-mono text-muted-foreground text-xs">{d.environmentId}</td>
+                  <td className="px-6 py-4 font-mono text-muted-foreground text-xs">{d.packageVersionId}</td>
                   <td className="px-6 py-4">
                     <Badge variant={d.status === "active" ? "default" : d.status === "failed" ? "destructive" : "secondary"}>
                       {d.status}
                     </Badge>
                   </td>
-                  <td className="px-6 py-4 text-muted-foreground">
+                  <td className="px-6 py-4 text-muted-foreground text-xs">
                     {new Date(d.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 text-right">

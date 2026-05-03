@@ -7,6 +7,11 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import {
+  CreateEnvironmentBody,
+  UpdateEnvironmentBody,
+  parseBody,
+} from "../lib/validation";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -20,17 +25,10 @@ router.post("/", async (req, res, next) => {
     const tenantId = res.locals.tenantId!;
     const params = req.params as Record<string, string>;
     const workspaceId = params["workspaceId"]!;
-    const { name, slug, type, metadata } = req.body as {
-      name?: string;
-      slug?: string;
-      type?: string;
-      metadata?: Record<string, unknown>;
-    };
 
-    if (!name || !slug || !type) {
-      res.status(400).json({ error: "name, slug, and type are required" });
-      return;
-    }
+    const body = parseBody(CreateEnvironmentBody, req.body, res);
+    if (!body) return;
+    const { name, slug, type, metadata } = body;
 
     const [ws] = await db
       .select({ id: workspacesTable.id })
@@ -75,7 +73,7 @@ router.post("/", async (req, res, next) => {
         tenantId,
         name,
         slug,
-        type: type as "development" | "staging" | "production",
+        type,
         metadata: metadata ?? {},
       })
       .returning();
@@ -170,18 +168,16 @@ router.patch("/:environmentId", async (req, res, next) => {
     const params = req.params as Record<string, string>;
     const workspaceId = params["workspaceId"]!;
     const environmentId = params["environmentId"]!;
-    const { name, status, metadata } = req.body as {
-      name?: string;
-      status?: string;
-      metadata?: Record<string, unknown>;
-    };
+
+    const body = parseBody(UpdateEnvironmentBody, req.body, res);
+    if (!body) return;
+    const { name, status, metadata } = body;
 
     const updates: Partial<typeof environmentsTable.$inferInsert> = {
       updatedAt: new Date(),
     };
     if (name !== undefined) updates.name = name;
-    if (status !== undefined)
-      updates.status = status as "active" | "inactive";
+    if (status !== undefined) updates.status = status;
     if (metadata !== undefined) updates.metadata = metadata;
 
     const [updated] = await db

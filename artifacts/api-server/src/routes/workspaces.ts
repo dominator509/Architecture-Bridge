@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, workspacesTable, tenantsTable } from "@workspace/db";
+import { db, workspacesTable } from "@workspace/db";
 import { eq, and, count } from "drizzle-orm";
 import { newWorkspaceId } from "../lib/ids";
 import { emitAuditEvent, auditEventTypes } from "../lib/audit";
@@ -7,6 +7,11 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import {
+  CreateWorkspaceBody,
+  UpdateWorkspaceBody,
+  parseBody,
+} from "../lib/validation";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -18,16 +23,9 @@ router.use(requireActiveTenant);
 router.post("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { name, slug, metadata } = req.body as {
-      name?: string;
-      slug?: string;
-      metadata?: Record<string, unknown>;
-    };
-
-    if (!name || !slug) {
-      res.status(400).json({ error: "name and slug are required" });
-      return;
-    }
+    const body = parseBody(CreateWorkspaceBody, req.body, res);
+    if (!body) return;
+    const { name, slug, metadata } = body;
 
     const existing = await db
       .select({ id: workspacesTable.id })
@@ -130,18 +128,15 @@ router.patch("/:workspaceId", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
     const { workspaceId } = req.params;
-    const { name, status, metadata } = req.body as {
-      name?: string;
-      status?: string;
-      metadata?: Record<string, unknown>;
-    };
+    const body = parseBody(UpdateWorkspaceBody, req.body, res);
+    if (!body) return;
+    const { name, status, metadata } = body;
 
     const updates: Partial<typeof workspacesTable.$inferInsert> = {
       updatedAt: new Date(),
     };
     if (name !== undefined) updates.name = name;
-    if (status !== undefined)
-      updates.status = status as "active" | "archived";
+    if (status !== undefined) updates.status = status;
     if (metadata !== undefined) updates.metadata = metadata;
 
     const [updated] = await db

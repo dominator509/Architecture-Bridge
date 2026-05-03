@@ -19,6 +19,7 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import { EvaluatePolicyBody, parseBody } from "../lib/validation";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -31,32 +32,10 @@ router.use(requireActiveTenant);
 router.post("/evaluate", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { principal, action, resource, context } = req.body as {
-      principal?: { id: string; type: string };
-      action?: string;
-      resource?: { type: string; id: string };
-      context?: Record<string, unknown>;
-    };
-
-    if (
-      !principal?.id ||
-      !principal?.type ||
-      !action ||
-      !resource?.type ||
-      !resource?.id
-    ) {
-      res.status(400).json({
-        error:
-          "principal (id, type), action, and resource (type, id) are required",
-      });
-      return;
-    }
-
-    const principalType = (
-      ["user", "agent", "system"] as const
-    ).includes(principal.type as "user" | "agent" | "system")
-      ? (principal.type as "user" | "agent" | "system")
-      : "user";
+    const body = parseBody(EvaluatePolicyBody, req.body, res);
+    if (!body) return;
+    const { principal, action, resource, context } = body;
+    const principalType = principal.type;
 
     const result = evaluatePolicy({
       principal: { id: principal.id, type: principalType },

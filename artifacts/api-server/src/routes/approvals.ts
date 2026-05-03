@@ -7,6 +7,8 @@
  *   2. On approved/rejected decision: updates the linked action_ledger entry
  *      (via actionLedgerEntryId) to "approved" or "cancelled".
  *   3. Emits audit event for every decision (including failed self-approve).
+ *
+ * Phase 4: Zod validation on all request bodies.
  */
 
 import { Router, type IRouter } from "express";
@@ -18,6 +20,11 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import {
+  CreateApprovalBody,
+  ApprovalDecisionBody,
+  parseBody,
+} from "../lib/validation";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -29,6 +36,8 @@ router.use(requireActiveTenant);
 router.post("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
+    const body = parseBody(CreateApprovalBody, req.body, res);
+    if (!body) return;
     const {
       resourceType,
       resourceId,
@@ -36,21 +45,7 @@ router.post("/", async (req, res, next) => {
       requesterId,
       requestPayload,
       expiresAt,
-    } = req.body as {
-      resourceType?: string;
-      resourceId?: string;
-      action?: string;
-      requesterId?: string;
-      requestPayload?: Record<string, unknown>;
-      expiresAt?: string;
-    };
-
-    if (!resourceType || !resourceId || !action || !requesterId) {
-      res.status(400).json({
-        error: "resourceType, resourceId, action, and requesterId are required",
-      });
-      return;
-    }
+    } = body;
 
     const id = newApprovalRequestId();
     const [approval] = await db
@@ -160,25 +155,10 @@ router.post("/:approvalId/decision", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
     const { approvalId } = req.params;
-    const { decision, reviewerId, decisionPayload } = req.body as {
-      decision?: string;
-      reviewerId?: string;
-      decisionPayload?: Record<string, unknown>;
-    };
 
-    if (!decision || !reviewerId) {
-      res
-        .status(400)
-        .json({ error: "decision and reviewerId are required" });
-      return;
-    }
-
-    if (decision !== "approved" && decision !== "rejected") {
-      res
-        .status(400)
-        .json({ error: "decision must be 'approved' or 'rejected'" });
-      return;
-    }
+    const body = parseBody(ApprovalDecisionBody, req.body, res);
+    if (!body) return;
+    const { decision, reviewerId, decisionPayload } = body;
 
     const [existing] = await db
       .select()
@@ -233,7 +213,7 @@ router.post("/:approvalId/decision", async (req, res, next) => {
     const [updated] = await db
       .update(approvalRequestsTable)
       .set({
-        status: decision as "approved" | "rejected",
+        status: decision,
         reviewerId,
         decisionPayload,
         decidedAt: now,

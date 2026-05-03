@@ -14,6 +14,11 @@ import {
   policyDecisionsTable,
   actionLedgerTable,
 } from "@workspace/db";
+import {
+  CreateTenantBody,
+  UpdateTenantBody,
+  parseBody,
+} from "../lib/validation";
 
 const router: IRouter = Router();
 const AET = auditEventTypes();
@@ -22,16 +27,9 @@ const SYSTEM_ACTOR = { actorId: "system", actorType: "system" as const };
 
 router.post("/tenants", async (req, res, next) => {
   try {
-    const { name, slug, metadata } = req.body as {
-      name?: string;
-      slug?: string;
-      metadata?: Record<string, unknown>;
-    };
-
-    if (!name || !slug) {
-      res.status(400).json({ error: "name and slug are required" });
-      return;
-    }
+    const body = parseBody(CreateTenantBody, req.body, res);
+    if (!body) return;
+    const { name, slug, metadata } = body;
 
     const existing = await db
       .select({ id: tenantsTable.id })
@@ -116,18 +114,15 @@ router.get("/tenants/:tenantId", async (req, res, next) => {
 router.patch("/tenants/:tenantId", async (req, res, next) => {
   try {
     const { tenantId } = req.params;
-    const { name, status, metadata } = req.body as {
-      name?: string;
-      status?: string;
-      metadata?: Record<string, unknown>;
-    };
+    const body = parseBody(UpdateTenantBody, req.body, res);
+    if (!body) return;
+    const { name, status, metadata } = body;
 
     const updates: Partial<typeof tenantsTable.$inferInsert> = {
       updatedAt: new Date(),
     };
     if (name !== undefined) updates.name = name;
-    if (status !== undefined)
-      updates.status = status as "active" | "suspended" | "deleted";
+    if (status !== undefined) updates.status = status;
     if (metadata !== undefined) updates.metadata = metadata;
 
     const [updated] = await db
