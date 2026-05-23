@@ -7,7 +7,7 @@
  *   3. User deployment:create → require_approval (202), act_ approval_required, pdec_ stored, apr_ created
  *   4. System deployment:create → allow (201), act_ executed, pdec_ stored
  *   5. Self-approval prevention → 403 with SELF_APPROVAL_DENIED code
- *   6. Approval granted → act_ updated to "approved", audit event emitted
+ *   6. Approval granted → suspended action executes, audit event emitted
  *   7. Approval rejected → act_ updated to "cancelled"
  *   8. Policy /evaluate endpoint stores pdec_ and returns outcome
  *   9. Audit events emitted for policy decisions, action ledger writes, approvals
@@ -509,7 +509,7 @@ describe("§5 Protected mutation — user actor approval gating", () => {
     expect(res.body.reviewerId).toBe("bob");
   });
 
-  it("act_ entry updated to approved after decision", async () => {
+  it("act_ entry executes and links the deployment after approval", async () => {
     await new Promise((r) => setTimeout(r, 100));
     const [entry] = await db
       .select()
@@ -517,8 +517,19 @@ describe("§5 Protected mutation — user actor approval gating", () => {
       .where(eq(actionLedgerTable.id, actionLedgerEntryId));
 
     expect(entry).toBeDefined();
-    expect(entry!.status).toBe("approved");
+    expect(entry!.status).toBe("executed");
+    expect(entry!.deploymentId).toMatch(/^dep_/);
     expect(entry!.completedAt).not.toBeNull();
+
+    const [deployment] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(eq(deploymentsTable.id, entry!.deploymentId!));
+
+    expect(deployment).toBeDefined();
+    expect(deployment!.environmentId).toBe(ENV_ID);
+    expect(deployment!.packageVersionId).toBe(PKGV_ID);
+    expect(deployment!.status).toBe("pending");
   });
 
   it("audit event emitted for approval decision", async () => {

@@ -53,6 +53,8 @@ const PKGV_ID = newPackageVersionId();
 const BASE = `/api/tenants/${TENANT_ID}`;
 
 let deploymentId: string;
+let statusApprovalId: string;
+let statusActionLedgerId: string;
 
 beforeAll(async () => {
   await db.insert(tenantsTable).values({
@@ -153,6 +155,19 @@ describe("§1 PATCH /deployments — policy gate for status transitions", () => 
     await request(app)
       .patch(`${BASE}/deployments/${deploymentId}`)
       .send({ status: "active" });
+    await request(app)
+      .patch(`${BASE}/deployments/${deploymentId}`)
+      .send({
+        metadata: {
+          tag: "approval-preserve",
+          runtimeStatus: "healthy",
+          runtime: {
+            provider: "managed-sandbox",
+            status: "healthy",
+            endpoint: "/runtime/phase4",
+          },
+        },
+      });
 
     const res = await request(app)
       .patch(`${BASE}/deployments/${deploymentId}`)
@@ -165,6 +180,8 @@ describe("§1 PATCH /deployments — policy gate for status transitions", () => 
     expect(res.body.approvalRequestId).toMatch(/^apr_/);
     expect(res.body.actionLedgerEntryId).toMatch(/^act_/);
     expect(res.body.policyDecisionId).toMatch(/^pdec_/);
+    statusApprovalId = res.body.approvalRequestId;
+    statusActionLedgerId = res.body.actionLedgerEntryId;
 
     // Deployment status should be unchanged (approval pending)
     const [dep] = await db
@@ -179,6 +196,40 @@ describe("§1 PATCH /deployments — policy gate for status transitions", () => 
       .from(actionLedgerTable)
       .where(eq(actionLedgerTable.id, res.body.actionLedgerEntryId));
     expect(act!.status).toBe("approval_required");
+  });
+
+  it("1b.1 approved status update executes the suspended transition", async () => {
+    const res = await request(app)
+      .post(`${BASE}/approvals/${statusApprovalId}/decision`)
+      .send({ decision: "approved", reviewerId: "usr_test_manager" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("approved");
+
+    const [dep] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(eq(deploymentsTable.id, deploymentId));
+    expect(dep!.status).toBe("stopped");
+    expect(dep!.metadata).toMatchObject({
+      tag: "approval-preserve",
+      runtimeStatus: "healthy",
+      runtime: {
+        provider: "managed-sandbox",
+        status: "healthy",
+      },
+    });
+
+    const [act] = await db
+      .select()
+      .from(actionLedgerTable)
+      .where(eq(actionLedgerTable.id, statusActionLedgerId));
+    expect(act!.status).toBe("executed");
+    expect(act!.deploymentId).toBe(deploymentId);
+
+    await request(app)
+      .patch(`${BASE}/deployments/${deploymentId}`)
+      .send({ status: "active" });
   });
 
   it("1c. agent actor → deny → 403 with POLICY_DENIED code", async () => {
@@ -330,5 +381,41 @@ describe("§3 Enhanced health check", () => {
     expect(res.body.status).toBe("ok");
     expect(res.body.db).toBe("ok");
     expect(typeof res.body.uptime).toBe("number");
+  });
+});
+
+describe("Runtime provisioning", () => {
+  it("provisions a managed runtime from deployment config", async () => {
+    const res = await request(app)
+      .post(`${BASE}/deployments/${deploymentId}/provision`)
+      .send({
+        provider: "managed-sandbox",
+        configOverrides: {
+          client: { name: "Phase4 Client" },
+          runtime: { model: "gpt-5.2" },
+          tools: ["web", "files"],
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.runtime.id).toMatch(/^rt_/);
+    expect(res.body.runtime.status).toBe("healthy");
+    expect(res.body.runtime.configSnapshotId).toMatch(/^cfg_/);
+    expect(res.body.deployment.status).toBe("active");
+
+    const [dep] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(eq(deploymentsTable.id, deploymentId));
+
+    expect(dep!.status).toBe("active");
+    expect(dep!.configSnapshotId).toMatch(/^cfg_/);
+    expect(dep!.metadata).toMatchObject({
+      runtimeStatus: "healthy",
+      runtime: {
+        provider: "managed-sandbox",
+        status: "healthy",
+      },
+    });
   });
 });

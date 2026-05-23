@@ -362,6 +362,56 @@ export interface ResolveConfigSnapshotBody {
   schemaVersion?: string;
 }
 
+/**
+ * Managed runtime evidence recorded after provisioning.
+ */
+export interface RuntimeState {
+  [key: string]: unknown;
+}
+
+export type ProvisionDeploymentBodyProvider =
+  (typeof ProvisionDeploymentBodyProvider)[keyof typeof ProvisionDeploymentBodyProvider];
+
+export const ProvisionDeploymentBodyProvider = {
+  "docker-local": "docker-local",
+  "managed-sandbox": "managed-sandbox",
+} as const;
+
+/**
+ * Optional runtime/client overrides merged onto the agent version manifest.
+ */
+export type ProvisionDeploymentBodyConfigOverrides = { [key: string]: unknown };
+
+export interface ProvisionDeploymentBody {
+  provider?: ProvisionDeploymentBodyProvider;
+  activate?: boolean;
+  /** Optional runtime/client overrides merged onto the agent version manifest. */
+  configOverrides?: ProvisionDeploymentBodyConfigOverrides;
+}
+
+export interface ProvisionDeploymentResponse {
+  deployment: Deployment;
+  runtime: RuntimeState;
+  configSnapshot: ConfigSnapshot;
+}
+
+export type DeploymentRuntimeResponseStatus =
+  (typeof DeploymentRuntimeResponseStatus)[keyof typeof DeploymentRuntimeResponseStatus];
+
+export const DeploymentRuntimeResponseStatus = {
+  pending: "pending",
+  active: "active",
+  failed: "failed",
+  stopped: "stopped",
+} as const;
+
+export interface DeploymentRuntimeResponse {
+  deploymentId: string;
+  status: DeploymentRuntimeResponseStatus;
+  runtime: RuntimeState | null;
+  configSnapshot: ConfigSnapshot | null;
+}
+
 export type AuditEventActorType =
   (typeof AuditEventActorType)[keyof typeof AuditEventActorType];
 

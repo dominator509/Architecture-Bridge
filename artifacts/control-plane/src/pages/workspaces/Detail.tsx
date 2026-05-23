@@ -63,7 +63,7 @@ export default function WorkspaceDetail() {
 
   return (
     <div className="p-8">
-      <Link href={`/tenants/${tenantId}/workspaces`} className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
+      <Link href="/workspaces" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
         <ArrowLeft className="mr-1 h-4 w-4" /> Back to Workspaces
       </Link>
       
@@ -171,7 +171,7 @@ export default function WorkspaceDetail() {
               {filtered.map(e => (
                 <tr key={e.id} className="hover:bg-muted/50 transition-colors">
                   <td className="px-6 py-4 font-medium">
-                    <Link href={`/tenants/${tenantId}/workspaces/${workspaceId}/environments/${e.id}`} className="text-primary hover:underline" data-testid={`link-env-${e.id}`}>
+                    <Link href={`/workspaces/${workspaceId}/environments/${e.id}`} className="text-primary hover:underline" data-testid={`link-env-${e.id}`}>
                       {e.name}
                     </Link>
                   </td>

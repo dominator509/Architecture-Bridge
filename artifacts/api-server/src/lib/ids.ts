@@ -38,3 +38,4 @@ export const newActionLedgerId = () => prefixed("act");
 export const newApprovalRequestId = () => prefixed("apr");
 export const newApprovalDecisionId = () => prefixed("aprd");
 export const newPolicyDecisionId = () => prefixed("pdec");
+export const newRuntimeId = () => prefixed("rt");

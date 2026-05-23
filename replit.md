@@ -2,7 +2,7 @@
 
 ## Overview
 
-Full-stack pnpm monorepo implementing Phases 1–4 + Security Audit of an AI Agent Deployment System. Provides a tenant-aware registry, policy enforcement (4-outcome default-deny engine), approval gating with self-approval prevention, action ledger evidence trail, and audit — all exposed via a RESTful API with a React control-plane UI. Phase 4 adds production hardening: Zod validation on all mutations, rate limiting, enhanced healthz, React error boundary, toast feedback, and seed data. Security audit (post-Phase 4) resolved all dependency CVEs and added CORS restriction and actor privilege-escalation protection.
+Full-stack pnpm monorepo implementing Phases 1–4 + Security Audit of an AI Agent Deployment System. Provides a tenant-aware registry, policy enforcement (4-outcome default-deny engine), approval gating with self-approval prevention, action ledger evidence trail, and audit — all exposed via a RESTful API with a React control-plane UI. The first productization pass adds an agent-oriented dashboard: reusable agent templates, structured version manifests, guided client deployment, config snapshot resolution, approval continuation so approved deployment actions actually execute, and a Docker-first local runtime adapter that records provisioned runtime health/evidence on deployments. Phase 4 adds production hardening: Zod validation on all mutations, rate limiting, enhanced healthz, React error boundary, toast feedback, and seed data. Security audit (post-Phase 4) resolved all dependency CVEs and added CORS restriction and actor privilege-escalation protection.
 
 ## Architecture
 
@@ -53,8 +53,8 @@ scripts/
 2. **Default-deny policy**: `evaluatePolicy()` in `lib/policy.ts` is the ONLY place policy decisions are made. Phase 3 rules: system → allow; user + deployment:create → require_approval; agent + deployment:create → deny; user + deployment:status_update → require_approval; agent + deployment:status_update → deny; unmatched → deny.
 3. **Policy decision persistence**: Every `evaluatePolicy()` call on a protected mutation stores a `pdec_` row via `storePolicyDecision()`. Every interactive `POST /policy/evaluate` call also stores a `pdec_` row.
 4. **Protected mutations evaluate policy first**: Both `POST /environments/:envId/deployments` and `PATCH /deployments/:id` (when status changes) read `X-Actor-Id`/`X-Actor-Type` headers, evaluate policy, write `pdec_` + `act_`, then branch: allow → proceed, deny → 403, require_approval → 202 + creates `apr_`. Metadata-only PATCH updates bypass the gate.
-5. **Action ledger lifecycle**: `act_` entries progress through: attempted → blocked | approval_required | executed. Approval decisions transition approval_required → approved | cancelled.
-6. **Approval gating**: When policy returns `require_approval`, an `apr_` record is created and execution halts at 202 until an authorized decision is recorded. The `apr_` links back to the `act_` via `actionLedgerEntryId`.
+5. **Action ledger lifecycle**: `act_` entries progress through: attempted → blocked | approval_required | executed | cancelled | failed. Approval decisions resume supported actions (`deployment:create`, `deployment:status_update`) or cancel them.
+6. **Approval gating**: When policy returns `require_approval`, an `apr_` record is created and execution halts at 202 until an authorized decision is recorded. The `apr_` links back to the `act_` via `actionLedgerEntryId`; approval now continues the suspended deployment action instead of only marking it approved.
 7. **Self-approval prevention**: `POST /approvals/:id/decision` rejects with 403/SELF_APPROVAL_DENIED if `reviewerId === requesterId`. The attempt is audited.
 8. **Audit foundation**: `emitAuditEvent()` in `lib/audit.ts` is the ONLY path for creating audit records.
 9. **Zod validation (Phase 4)**: ALL POST/PATCH route bodies are validated via schemas in `api-server/src/lib/validation.ts`. Invalid requests return `{ error, code: "VALIDATION_ERROR", details }` with HTTP 400.
@@ -62,7 +62,7 @@ scripts/
 11. **Global error handler (Phase 4)**: 4-arg Express middleware in `app.ts` catches all unhandled errors. Never leaks stack traces in production.
 12. **Prefixed IDs**: All IDs generated via `lib/ids.ts` using `customAlphabet` nanoid.
 
-## API Routes (38 endpoints)
+## API Routes (40 endpoints)
 
 ```
 GET  /api/healthz               ← Phase 4: DB ping, uptime, version
@@ -97,6 +97,8 @@ GET  /api/tenants/:tenantId/deployments/:deploymentId
 PATCH /api/tenants/:tenantId/deployments/:deploymentId              ← Phase 3+4 protected + Zod
 POST /api/tenants/:tenantId/deployments/:deploymentId/config-snapshot ← Phase 4: Zod validated
 GET  /api/tenants/:tenantId/deployments/:deploymentId/config-snapshot
+POST /api/tenants/:tenantId/deployments/:deploymentId/provision       ← Docker/local runtime adapter: resolves config + records runtime health
+GET  /api/tenants/:tenantId/deployments/:deploymentId/runtime         ← Runtime status + latest config snapshot
 
 GET  /api/tenants/:tenantId/audit-events
 GET  /api/tenants/:tenantId/action-ledger
@@ -146,8 +148,14 @@ POST /approvals/:approvalId/decision
   ├─ Fetch approval_request
   ├─ Self-approval check: reviewerId === requesterId → 403 SELF_APPROVAL_DENIED + audit
   ├─ Update approval_request: status=approved|rejected, reviewerId, decidedAt
-  ├─ If actionLedgerEntryId linked:
-  │    └─ Update act_: status=approved|cancelled, completedAt + emit audit
+  ├─ If approved + linked deployment:create:
+  │    ├─ Create dep_ from stored request payload
+  │    └─ Update act_: status=executed, deploymentId, completedAt + emit audit
+  ├─ If approved + linked deployment:status_update:
+  │    ├─ Apply stored status transition
+  │    └─ Update act_: status=executed, deploymentId, completedAt + emit audit
+  ├─ If rejected + linked:
+  │    └─ Update act_: status=cancelled, completedAt + emit audit
   └─ Emit audit: approval.decided
 ```
 
@@ -157,7 +165,7 @@ POST /approvals/:approvalId/decision
 pnpm run typecheck                              # Full typecheck (libs + artifacts)
 pnpm --filter @workspace/api-spec run codegen  # Regen hooks + Zod from OpenAPI
 pnpm --filter @workspace/db run push           # Push schema (dev only)
-pnpm --filter @workspace/api-server test       # Run test suite (60 tests)
+pnpm --filter @workspace/api-server test       # Run API test suite (requires DATABASE_URL)
 pnpm --filter @workspace/scripts run seed-phase3  # Seed Phase 3 demo data
 ```
 
@@ -175,7 +183,7 @@ pnpm --filter @workspace/scripts run seed-phase3  # Seed Phase 3 demo data
   - §2 POST /policy/evaluate (4): stores pdec_, returns outcome, emits audit
   - §3 GET /policy/decisions (2): list + outcome filter
   - §4 Agent blocked (4): 403 response, act_ blocked, pdec_ deny, audit
-  - §5 User approval gating (11): 202 response, act_ approval_required, pdec_ require_approval, apr_ created + linked, audit, self-approve 403, self-approve audit, state preserved, approve-granted, act_ approved, audit decided, 409 duplicate
+  - §5 User approval gating (11): 202 response, act_ approval_required, pdec_ require_approval, apr_ created + linked, audit, self-approve 403, self-approve audit, state preserved, approve-granted, act_ executed with deploymentId, audit decided, 409 duplicate
   - §6 System allow (3): 201, act_ executed, no-header defaults to system
   - §7 Rejection flow (3): create → reject → act_ cancelled
   - §8 Action ledger (4): list, status filter blocked, status filter executed, all act_ link pdec_
@@ -215,9 +223,9 @@ All 13 pages are fully connected to live API data via generated hooks:
 | Workspaces | `/tenants/:id/workspaces` | List + create + toast feedback (Phase 4) |
 | Workspace Detail | `/tenants/:id/workspaces/:wid` | Environments list |
 | Environment Detail | `/tenants/:id/workspaces/:wid/environments/:eid` | Deployments in env |
-| Packages | `/tenants/:id/packages` | List + create |
-| Package Detail | `/tenants/:id/packages/:pid` | Version list |
-| Deployments | `/tenants/:id/deployments` | Policy-aware create dialog + toast feedback (Phase 4) |
+| Agents | `/tenants/:id/packages` | Agent template list + create |
+| Agent Detail | `/tenants/:id/packages/:pid` | Structured agent version publishing |
+| Agent Deployments | `/tenants/:id/deployments` | Guided deploy wizard with client config, Docker-local runtime provisioning, runtime health, and activation |
 | Approvals | `/tenants/:id/approvals` | Pending + decision actions; reviewer ID dialog; actionLedgerEntryId column |
 | Audit Log | `/tenants/:id/audit` | Immutable event stream |
 | Action Ledger | `/tenants/:id/action-ledger` | Status-filtered act_ evidence trail |

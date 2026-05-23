@@ -4,7 +4,7 @@ import { useGetTenant, getGetTenantQueryKey } from "@workspace/api-client-react"
 import {
   LayoutDashboard,
   Box,
-  Layers,
+  Bot,
   Activity,
   ShieldCheck,
   FileTerminal,
@@ -26,7 +26,7 @@ import {
 const navItems = [
   { href: "", label: "Overview", icon: LayoutDashboard, end: true },
   { href: "/workspaces", label: "Workspaces", icon: Box },
-  { href: "/packages", label: "Packages", icon: Layers },
+  { href: "/packages", label: "Agents", icon: Bot },
   { href: "/deployments", label: "Deployments", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: ShieldCheck },
   { href: "/audit", label: "Audit Log", icon: FileTerminal },
@@ -47,16 +47,14 @@ export function TenantLayout({ children }: { children: ReactNode }) {
     }
   });
 
-  const basePath = `/tenants/${tenantId}`;
-
   return (
     <div className="flex min-h-screen w-full bg-background">
       <aside className="hidden md:flex w-64 border-r border-border bg-card flex-col">
         <div className="p-4 border-b border-border">
-          <Link href="/" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground mb-4 transition-colors" data-testid="link-back-tenants">
+          <a href="/" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground mb-4 transition-colors" data-testid="link-back-tenants">
             <ArrowLeft className="mr-1 h-3 w-3" />
             Back to Tenants
-          </Link>
+          </a>
           {isLoading ? (
             <div className="h-6 w-32 bg-muted rounded animate-pulse" />
           ) : (
@@ -73,7 +71,7 @@ export function TenantLayout({ children }: { children: ReactNode }) {
 
         <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
           {navItems.map((item) => {
-            const href = `${basePath}${item.href}`;
+            const href = item.href || "/";
             const isActive = item.end ? location === href : location.startsWith(href);
             const Icon = item.icon;
 
@@ -120,7 +118,7 @@ export function TenantLayout({ children }: { children: ReactNode }) {
               </SheetHeader>
               <div className="flex h-full flex-col">
                 <div className="p-4 border-b border-border">
-                  <Link
+                  <a
                     href="/"
                     className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground mb-4 transition-colors"
                     data-testid="mobile-link-back-tenants"
@@ -128,7 +126,7 @@ export function TenantLayout({ children }: { children: ReactNode }) {
                   >
                     <ArrowLeft className="mr-1 h-3 w-3" />
                     Back to Tenants
-                  </Link>
+                  </a>
                   <div>
                     <h2 className="font-bold text-lg text-card-foreground tracking-tight truncate">
                       {tenant?.name || "Unknown Tenant"}
@@ -140,7 +138,7 @@ export function TenantLayout({ children }: { children: ReactNode }) {
                 </div>
                 <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
                   {navItems.map((item) => {
-                    const href = `${basePath}${item.href}`;
+                    const href = item.href || "/";
                     const isActive = item.end ? location === href : location.startsWith(href);
                     const Icon = item.icon;
 

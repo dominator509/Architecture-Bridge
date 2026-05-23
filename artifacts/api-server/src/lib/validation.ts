@@ -104,6 +104,12 @@ export const CreateConfigSnapshotBody = z.object({
   schemaVersion: z.string().optional(),
 });
 
+export const ProvisionDeploymentBody = z.object({
+  provider: z.enum(["docker-local", "managed-sandbox"]).default("docker-local"),
+  activate: z.boolean().default(true),
+  configOverrides: z.record(z.string(), z.unknown()).optional(),
+});
+
 // ── Approvals ──────────────────────────────────────────────────────────────────
 
 export const CreateApprovalBody = z.object({

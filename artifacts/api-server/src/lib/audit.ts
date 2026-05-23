@@ -80,6 +80,12 @@ export function auditEventTypes() {
     configSnapshot: {
       resolved: "config_snapshot.resolved",
     },
+    runtime: {
+      provisioned: "runtime.provisioned",
+      provisionFailed: "runtime.provision_failed",
+      lifecycleUpdated: "runtime.lifecycle_updated",
+      lifecycleFailed: "runtime.lifecycle_failed",
+    },
     approval: {
       created: "approval.created",
       decided: "approval.decided",

@@ -33,6 +33,7 @@ import type {
   CreateWorkspaceBody,
   Deployment,
   DeploymentList,
+  DeploymentRuntimeResponse,
   Environment,
   EnvironmentList,
   HealthStatus,
@@ -54,6 +55,8 @@ import type {
   PolicyDecision,
   PolicyDecisionList,
   PolicyEvaluationRequest,
+  ProvisionDeploymentBody,
+  ProvisionDeploymentResponse,
   ResolveConfigSnapshotBody,
   Tenant,
   TenantList,
@@ -2625,6 +2628,234 @@ export const useUpdateDeployment = <
 > => {
   return useMutation(getUpdateDeploymentMutationOptions(options));
 };
+
+/**
+ * @summary Provision a managed runtime for a deployment
+ */
+export const getProvisionDeploymentRuntimeUrl = (
+  tenantId: string,
+  deploymentId: string,
+) => {
+  return `/api/tenants/${tenantId}/deployments/${deploymentId}/provision`;
+};
+
+export const provisionDeploymentRuntime = async (
+  tenantId: string,
+  deploymentId: string,
+  provisionDeploymentBody?: ProvisionDeploymentBody,
+  options?: RequestInit,
+): Promise<ProvisionDeploymentResponse> => {
+  return customFetch<ProvisionDeploymentResponse>(
+    getProvisionDeploymentRuntimeUrl(tenantId, deploymentId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(provisionDeploymentBody),
+    },
+  );
+};
+
+export const getProvisionDeploymentRuntimeMutationOptions = <
+  TError = ErrorType<ApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof provisionDeploymentRuntime>>,
+    TError,
+    {
+      tenantId: string;
+      deploymentId: string;
+      data: BodyType<ProvisionDeploymentBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof provisionDeploymentRuntime>>,
+  TError,
+  {
+    tenantId: string;
+    deploymentId: string;
+    data: BodyType<ProvisionDeploymentBody>;
+  },
+  TContext
+> => {
+  const mutationKey = ["provisionDeploymentRuntime"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof provisionDeploymentRuntime>>,
+    {
+      tenantId: string;
+      deploymentId: string;
+      data: BodyType<ProvisionDeploymentBody>;
+    }
+  > = (props) => {
+    const { tenantId, deploymentId, data } = props ?? {};
+
+    return provisionDeploymentRuntime(
+      tenantId,
+      deploymentId,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ProvisionDeploymentRuntimeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof provisionDeploymentRuntime>>
+>;
+export type ProvisionDeploymentRuntimeMutationBody =
+  BodyType<ProvisionDeploymentBody>;
+export type ProvisionDeploymentRuntimeMutationError = ErrorType<ApiError>;
+
+/**
+ * @summary Provision a managed runtime for a deployment
+ */
+export const useProvisionDeploymentRuntime = <
+  TError = ErrorType<ApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof provisionDeploymentRuntime>>,
+    TError,
+    {
+      tenantId: string;
+      deploymentId: string;
+      data: BodyType<ProvisionDeploymentBody>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof provisionDeploymentRuntime>>,
+  TError,
+  {
+    tenantId: string;
+    deploymentId: string;
+    data: BodyType<ProvisionDeploymentBody>;
+  },
+  TContext
+> => {
+  return useMutation(getProvisionDeploymentRuntimeMutationOptions(options));
+};
+
+/**
+ * @summary Get runtime status and latest config snapshot for a deployment
+ */
+export const getGetDeploymentRuntimeUrl = (
+  tenantId: string,
+  deploymentId: string,
+) => {
+  return `/api/tenants/${tenantId}/deployments/${deploymentId}/runtime`;
+};
+
+export const getDeploymentRuntime = async (
+  tenantId: string,
+  deploymentId: string,
+  options?: RequestInit,
+): Promise<DeploymentRuntimeResponse> => {
+  return customFetch<DeploymentRuntimeResponse>(
+    getGetDeploymentRuntimeUrl(tenantId, deploymentId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDeploymentRuntimeQueryKey = (
+  tenantId: string,
+  deploymentId: string,
+) => {
+  return [
+    `/api/tenants/${tenantId}/deployments/${deploymentId}/runtime`,
+  ] as const;
+};
+
+export const getGetDeploymentRuntimeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDeploymentRuntime>>,
+  TError = ErrorType<ApiError>,
+>(
+  tenantId: string,
+  deploymentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDeploymentRuntime>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetDeploymentRuntimeQueryKey(tenantId, deploymentId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDeploymentRuntime>>
+  > = ({ signal }) =>
+    getDeploymentRuntime(tenantId, deploymentId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(tenantId && deploymentId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDeploymentRuntime>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDeploymentRuntimeQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDeploymentRuntime>>
+>;
+export type GetDeploymentRuntimeQueryError = ErrorType<ApiError>;
+
+/**
+ * @summary Get runtime status and latest config snapshot for a deployment
+ */
+
+export function useGetDeploymentRuntime<
+  TData = Awaited<ReturnType<typeof getDeploymentRuntime>>,
+  TError = ErrorType<ApiError>,
+>(
+  tenantId: string,
+  deploymentId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDeploymentRuntime>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDeploymentRuntimeQueryOptions(
+    tenantId,
+    deploymentId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Resolve and store a config snapshot for a deployment

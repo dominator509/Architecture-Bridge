@@ -132,10 +132,14 @@ async function main() {
       resourceType: "deployment",
       resourceId: deploymentId ?? id("dep_"),
       outcome: o.outcome,
-      allowed: o.outcome === "allow",
       reason: o.reason,
       matchedRule: o.matchedRule,
-      evaluatedAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000),
+      context: {
+        allowed: o.outcome === "allow",
+        evaluatedAt: new Date(
+          Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      },
     });
     console.log(`  ✓ pdec_ [${o.outcome.padEnd(18)}] ${o.principal.type} / ${o.action}`);
   }

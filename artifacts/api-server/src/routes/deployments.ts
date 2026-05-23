@@ -30,6 +30,7 @@ import {
   newConfigSnapshotId,
   newActionLedgerId,
   newApprovalRequestId,
+  newRuntimeId,
 } from "../lib/ids";
 import { emitAuditEvent, auditEventTypes } from "../lib/audit";
 import { evaluatePolicy, storePolicyDecision } from "../lib/policy";
@@ -37,6 +38,7 @@ import {
   CreateDeploymentBody,
   UpdateDeploymentBody,
   CreateConfigSnapshotBody,
+  ProvisionDeploymentBody,
   parseBody,
 } from "../lib/validation";
 import {
@@ -44,10 +46,174 @@ import {
   requireActiveTenant,
 } from "../lib/tenantContext";
 import { resolveActor } from "../lib/actorContext";
+import { provisionDockerRuntime } from "../lib/dockerRuntime";
+import {
+  applyRuntimeLifecycleForStatus,
+  type DeploymentStatus,
+} from "../lib/runtimeLifecycle";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
 const SYSTEM_ACTOR = { actorId: "system", actorType: "system" as const };
+
+type DeploymentRow = typeof deploymentsTable.$inferSelect;
+type ConfigSnapshotRow = typeof configSnapshotsTable.$inferSelect;
+type RuntimeProvider = "docker-local" | "managed-sandbox";
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function readNestedString(
+  record: Record<string, unknown>,
+  path: string[],
+): string | undefined {
+  let current: unknown = record;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return typeof current === "string" && current.trim() !== ""
+    ? current
+    : undefined;
+}
+
+function readStringArray(
+  record: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = record[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+async function resolveConfigSnapshot({
+  tenantId,
+  deployment,
+  configOverrides,
+  schemaVersion,
+}: {
+  tenantId: string;
+  deployment: DeploymentRow;
+  configOverrides?: Record<string, unknown>;
+  schemaVersion?: string;
+}): Promise<ConfigSnapshotRow | null> {
+  if (!configOverrides) {
+    const [existing] = await db
+      .select()
+      .from(configSnapshotsTable)
+      .where(
+        and(
+          eq(configSnapshotsTable.deploymentId, deployment.id),
+          eq(configSnapshotsTable.tenantId, tenantId),
+        ),
+      )
+      .orderBy(desc(configSnapshotsTable.createdAt))
+      .limit(1);
+
+    if (existing) return existing;
+  }
+
+  const [pkgVersion] = await db
+    .select({ manifest: packageVersionsTable.manifest })
+    .from(packageVersionsTable)
+    .where(
+      and(
+        eq(packageVersionsTable.id, deployment.packageVersionId),
+        eq(packageVersionsTable.tenantId, tenantId),
+      ),
+    )
+    .limit(1);
+
+  if (!pkgVersion) return null;
+
+  const resolvedConfig = {
+    ...asRecord(pkgVersion.manifest),
+    ...(configOverrides ?? asRecord(deployment.metadata)),
+  };
+
+  const id = newConfigSnapshotId();
+  const [snapshot] = await db
+    .insert(configSnapshotsTable)
+    .values({
+      id,
+      deploymentId: deployment.id,
+      tenantId,
+      resolvedConfig,
+      schemaVersion: schemaVersion ?? "agent-deployment/v1",
+    })
+    .returning();
+
+  return snapshot ?? null;
+}
+
+function buildManagedRuntime({
+  tenantId,
+  deployment,
+  snapshot,
+  provider,
+}: {
+  tenantId: string;
+  deployment: DeploymentRow;
+  snapshot: ConfigSnapshotRow;
+  provider: RuntimeProvider;
+}) {
+  const now = new Date().toISOString();
+  const config = asRecord(snapshot.resolvedConfig);
+  const runtime = asRecord(config["runtime"]);
+  const client = asRecord(config["client"]);
+  const model =
+    readNestedString(config, ["runtime", "model"]) ??
+    readNestedString(config, ["model"]) ??
+    "default";
+  const tools = readStringArray(config, "tools");
+  const runtimeImage =
+    readNestedString(config, ["runtime", "image"]) ??
+    process.env["AGENT_RUNTIME_IMAGE"] ??
+    "node:22-alpine";
+
+  return {
+    id: newRuntimeId(),
+    provider,
+    mode: provider === "docker-local" ? "docker-container" : "managed-sandbox",
+    deploymentId: deployment.id,
+    tenantId,
+    configSnapshotId: snapshot.id,
+    status: provider === "docker-local" ? "provisioning" : "healthy",
+    endpoint:
+      provider === "docker-local" ? undefined : `/runtime/${tenantId}/${deployment.id}`,
+    startedAt: now,
+    lastHealthCheckAt: now,
+    model,
+    tools,
+    image: runtimeImage,
+    clientName:
+      readNestedString(config, ["client", "name"]) ??
+      readNestedString(asRecord(deployment.metadata), ["clientName"]),
+    objective: readNestedString(config, ["objective"]),
+    health: {
+      state: provider === "docker-local" ? "provisioning" : "healthy",
+      checks: {
+        configResolved: true,
+        modelConfigured: Boolean(model),
+        toolCount: tools.length,
+        clientConfigured: Boolean(client["name"]),
+        runtimeConfigured: Object.keys(runtime).length > 0,
+        dockerContainerStarted: provider !== "docker-local",
+      },
+    },
+    events: [
+      {
+        at: now,
+        level: "info",
+        message: "Managed runtime provisioned from resolved config snapshot",
+      },
+    ],
+  };
+}
 
 router.use(resolveTenantContext);
 router.use(requireActiveTenant);
@@ -83,6 +249,237 @@ router.get("/deployments", async (req, res, next) => {
     ]);
 
     res.json({ items, total: Number(total), limit, offset });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Managed runtime adapter. This is the first execution boundary: it turns a
+// deployment + resolved config snapshot into runtime evidence stored on the
+// deployment metadata. Provider-specific adapters can replace this seam later.
+router.post("/deployments/:deploymentId/provision", async (req, res, next) => {
+  try {
+    const tenantId = res.locals.tenantId!;
+    const { deploymentId } = req.params;
+    const body = parseBody(ProvisionDeploymentBody, req.body, res);
+    if (!body) return;
+    const provider = body.provider ?? "docker-local";
+    const activate = body.activate ?? true;
+    const { configOverrides } = body;
+    const { actorId, actorType } = resolveActor(req);
+
+    const [deployment] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(
+        and(
+          eq(deploymentsTable.id, deploymentId),
+          eq(deploymentsTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+
+    if (!deployment) {
+      res.status(404).json({ error: "Deployment not found" });
+      return;
+    }
+
+    const snapshot = await resolveConfigSnapshot({
+      tenantId,
+      deployment,
+      configOverrides,
+      schemaVersion: "agent-deployment/v1",
+    });
+
+    if (!snapshot) {
+      res.status(404).json({ error: "Package version not found" });
+      return;
+    }
+
+    let runtime = buildManagedRuntime({
+      tenantId,
+      deployment,
+      snapshot,
+      provider,
+    });
+
+    if (provider === "docker-local") {
+      if (process.env["DOCKER_RUNTIME_ENABLED"] === "true") {
+        try {
+          const dockerRuntime = await provisionDockerRuntime({
+            runtimeId: runtime.id,
+            tenantId,
+            deploymentId: deployment.id,
+            image: runtime.image,
+            model: runtime.model,
+            tools: runtime.tools,
+            clientName: runtime.clientName,
+            objective: runtime.objective,
+          });
+
+          runtime = {
+            ...runtime,
+            ...dockerRuntime,
+            status: "healthy",
+            lastHealthCheckAt: new Date().toISOString(),
+            health: {
+              ...runtime.health,
+              state: "healthy",
+              checks: {
+                ...runtime.health.checks,
+                dockerContainerStarted: true,
+              },
+            },
+            events: [
+              ...runtime.events,
+              {
+                at: new Date().toISOString(),
+                level: "info",
+                message: "Docker runtime container started",
+              },
+            ],
+          };
+        } catch (err) {
+          await emitAuditEvent({
+            tenantId,
+            actorId,
+            actorType,
+            eventType: AET.runtime.provisionFailed,
+            resourceType: "deployment",
+            resourceId: deploymentId,
+            payload: {
+              provider,
+              configSnapshotId: snapshot.id,
+              error: err instanceof Error ? err.message : "Unknown error",
+            },
+          });
+
+          res.status(502).json({
+            error: "Docker runtime provisioning failed",
+            code: "RUNTIME_PROVISION_FAILED",
+            details: err instanceof Error ? err.message : "Unknown error",
+          });
+          return;
+        }
+      } else {
+        runtime = {
+          ...runtime,
+          status: "planned",
+          health: {
+            ...runtime.health,
+            state: "planned",
+          },
+          events: [
+            ...runtime.events,
+            {
+              at: new Date().toISOString(),
+              level: "info",
+              message:
+                "Docker runtime planned; set DOCKER_RUNTIME_ENABLED=true to start containers",
+            },
+          ],
+        };
+      }
+    }
+
+    const previousMetadata = asRecord(deployment.metadata);
+    const previousHistory = Array.isArray(previousMetadata["runtimeHistory"])
+      ? previousMetadata["runtimeHistory"]
+      : [];
+    const runtimeHistory = [
+      ...previousHistory,
+      {
+        runtimeId: runtime.id,
+        provider: runtime.provider,
+        status: runtime.status,
+        at: runtime.startedAt,
+      },
+    ].slice(-10);
+
+    const [updated] = await db
+      .update(deploymentsTable)
+      .set({
+        status: activate && runtime.status === "healthy" ? "active" : deployment.status,
+        configSnapshotId: snapshot.id,
+        metadata: {
+          ...previousMetadata,
+          runtime,
+          runtimeHistory,
+          runtimeStatus: runtime.status,
+          lastProvisionedAt: runtime.startedAt,
+        },
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(deploymentsTable.id, deploymentId),
+          eq(deploymentsTable.tenantId, tenantId),
+        ),
+      )
+      .returning();
+
+    await emitAuditEvent({
+      tenantId,
+      actorId,
+      actorType,
+      eventType: AET.runtime.provisioned,
+      resourceType: "deployment",
+      resourceId: deploymentId,
+      payload: {
+        runtimeId: runtime.id,
+        provider,
+        status: runtime.status,
+        configSnapshotId: snapshot.id,
+        activated: activate,
+      },
+    });
+
+    res.json({ deployment: updated, runtime, configSnapshot: snapshot });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/deployments/:deploymentId/runtime", async (req, res, next) => {
+  try {
+    const tenantId = res.locals.tenantId!;
+    const { deploymentId } = req.params;
+
+    const [deployment] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(
+        and(
+          eq(deploymentsTable.id, deploymentId),
+          eq(deploymentsTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+
+    if (!deployment) {
+      res.status(404).json({ error: "Deployment not found" });
+      return;
+    }
+
+    const metadata = asRecord(deployment.metadata);
+    const [snapshot] = await db
+      .select()
+      .from(configSnapshotsTable)
+      .where(
+        and(
+          eq(configSnapshotsTable.deploymentId, deploymentId),
+          eq(configSnapshotsTable.tenantId, tenantId),
+        ),
+      )
+      .orderBy(desc(configSnapshotsTable.createdAt))
+      .limit(1);
+
+    res.json({
+      deploymentId,
+      status: deployment.status,
+      runtime: metadata["runtime"] ?? null,
+      configSnapshot: snapshot ?? null,
+    });
   } catch (err) {
     next(err);
   }
@@ -427,8 +824,18 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
       return;
     }
 
+    const statusTransition =
+      status !== undefined && status !== existing.status
+        ? {
+            fromStatus: existing.status as DeploymentStatus,
+            toStatus: status as DeploymentStatus,
+          }
+        : undefined;
+    let statusActionLedgerId: string | undefined;
+    let statusPolicyDecisionId: string | undefined;
+
     // ── Policy gate: only for status transitions, not metadata-only updates ──
-    if (status !== undefined && status !== existing.status) {
+    if (statusTransition) {
       const policyResult = evaluatePolicy({
         principal: { id: actorId, type: actorType },
         action: "deployment:status_update",
@@ -441,8 +848,9 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
         action: "deployment:status_update",
         resource: { type: "deployment", id: deploymentId },
         result: policyResult,
-        context: { fromStatus: existing.status, toStatus: status },
+        context: statusTransition,
       });
+      statusPolicyDecisionId = policyDecisionId;
 
       await emitAuditEvent({
         tenantId,
@@ -459,6 +867,7 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
       });
 
       const actionLedgerId = newActionLedgerId();
+      statusActionLedgerId = actionLedgerId;
       await db.insert(actionLedgerTable).values({
         id: actionLedgerId,
         tenantId,
@@ -470,8 +879,7 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
         deploymentId,
         requestPayload: {
           deploymentId,
-          fromStatus: existing.status,
-          toStatus: status,
+          ...statusTransition,
         },
       });
 
@@ -533,9 +941,8 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
             action: "deployment:status_update",
             requesterId: actorId,
             requestPayload: {
-              fromStatus: existing.status,
-              toStatus: status,
-              metadata: metadata ?? {},
+              ...statusTransition,
+              ...(metadata !== undefined ? { metadata } : {}),
             },
             actionLedgerEntryId: actionLedgerId,
             status: "pending",
@@ -557,8 +964,7 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
           payload: {
             outcome: policyResult.outcome,
             deploymentId,
-            fromStatus: existing.status,
-            toStatus: status,
+            ...statusTransition,
             policyDecisionId,
             actionLedgerEntryId: actionLedgerId,
           },
@@ -578,28 +984,75 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
         return;
       }
 
-      // ALLOW — mark act_ as executed before applying the update
-      await db
-        .update(actionLedgerTable)
-        .set({
-          status: "executed",
-          completedAt: new Date(),
-          responsePayload: {
-            deploymentId,
-            fromStatus: existing.status,
-            toStatus: status,
-          },
-        })
-        .where(eq(actionLedgerTable.id, actionLedgerId));
+      // ALLOW — fall through and mark the action executed after the write succeeds.
     }
 
     // ── Apply the update ─────────────────────────────────────────────────────
+    const now = new Date();
+    const baseMetadata = metadata !== undefined ? metadata : existing.metadata;
+    let lifecycle:
+      | Awaited<ReturnType<typeof applyRuntimeLifecycleForStatus>>
+      | undefined;
+
+    if (statusTransition) {
+      try {
+        lifecycle = await applyRuntimeLifecycleForStatus({
+          metadata: baseMetadata,
+          status: statusTransition.toStatus,
+          now,
+        });
+      } catch (err) {
+        const details = err instanceof Error ? err.message : "Unknown error";
+
+        if (statusActionLedgerId) {
+          await db
+            .update(actionLedgerTable)
+            .set({
+              status: "failed",
+              completedAt: now,
+              responsePayload: {
+                deploymentId,
+                ...statusTransition,
+                error: "Runtime lifecycle update failed",
+                details,
+              },
+            })
+            .where(eq(actionLedgerTable.id, statusActionLedgerId));
+        }
+
+        await emitAuditEvent({
+          tenantId,
+          actorId,
+          actorType,
+          eventType: AET.runtime.lifecycleFailed,
+          resourceType: "deployment",
+          resourceId: deploymentId,
+          payload: {
+            ...statusTransition,
+            policyDecisionId: statusPolicyDecisionId,
+            actionLedgerEntryId: statusActionLedgerId,
+            error: details,
+          },
+        });
+
+        res.status(502).json({
+          error: "Runtime lifecycle update failed",
+          code: "RUNTIME_LIFECYCLE_FAILED",
+          details,
+        });
+        return;
+      }
+    }
+
     const updates: Partial<typeof deploymentsTable.$inferInsert> = {
-      updatedAt: new Date(),
+      updatedAt: now,
     };
-    if (status !== undefined)
-      updates.status = status as "pending" | "active" | "failed" | "stopped";
-    if (metadata !== undefined) updates.metadata = metadata;
+    if (status !== undefined) updates.status = status as DeploymentStatus;
+    if (lifecycle?.runtimeChanged) {
+      updates.metadata = lifecycle.metadata;
+    } else if (metadata !== undefined) {
+      updates.metadata = metadata;
+    }
 
     const [updated] = await db
       .update(deploymentsTable)
@@ -615,6 +1068,42 @@ router.patch("/deployments/:deploymentId", async (req, res, next) => {
     if (!updated) {
       res.status(404).json({ error: "Deployment not found" });
       return;
+    }
+
+    if (statusTransition && statusActionLedgerId) {
+      await db
+        .update(actionLedgerTable)
+        .set({
+          status: "executed",
+          completedAt: now,
+          responsePayload: {
+            deploymentId,
+            ...statusTransition,
+            ...(lifecycle?.runtimeChanged
+              ? {
+                  runtimeAction: lifecycle.action,
+                  runtime: lifecycle.runtime,
+                }
+              : {}),
+          },
+        })
+        .where(eq(actionLedgerTable.id, statusActionLedgerId));
+    }
+
+    if (lifecycle?.runtimeChanged) {
+      await emitAuditEvent({
+        tenantId,
+        actorId,
+        actorType,
+        eventType: AET.runtime.lifecycleUpdated,
+        resourceType: "deployment",
+        resourceId: deploymentId,
+        payload: {
+          runtimeAction: lifecycle.action,
+          runtime: lifecycle.runtime,
+          ...statusTransition,
+        },
+      });
     }
 
     await emitAuditEvent({
@@ -664,11 +1153,21 @@ router.post(
       const [pkgVersion] = await db
         .select({ manifest: packageVersionsTable.manifest })
         .from(packageVersionsTable)
-        .where(eq(packageVersionsTable.id, deployment.packageVersionId))
+        .where(
+          and(
+            eq(packageVersionsTable.id, deployment.packageVersionId),
+            eq(packageVersionsTable.tenantId, tenantId),
+          ),
+        )
         .limit(1);
 
+      if (!pkgVersion) {
+        res.status(404).json({ error: "Package version not found" });
+        return;
+      }
+
       const resolvedConfig = {
-        ...(pkgVersion?.manifest ?? {}),
+        ...asRecord(pkgVersion.manifest),
         ...(configOverrides ?? {}),
       };
 
@@ -687,7 +1186,12 @@ router.post(
       await db
         .update(deploymentsTable)
         .set({ configSnapshotId: id, updatedAt: new Date() })
-        .where(eq(deploymentsTable.id, deploymentId));
+        .where(
+          and(
+            eq(deploymentsTable.id, deploymentId),
+            eq(deploymentsTable.tenantId, tenantId),
+          ),
+        );
 
       await emitAuditEvent({
         tenantId,

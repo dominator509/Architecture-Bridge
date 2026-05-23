@@ -4,17 +4,24 @@
  * Phase 3 hardening on POST /:approvalId/decision:
  *   1. Self-approval prevention: reviewerId must differ from requesterId.
  *      A self-approve attempt emits an audit event and returns 403.
- *   2. On approved/rejected decision: updates the linked action_ledger entry
- *      (via actionLedgerEntryId) to "approved" or "cancelled".
+ *   2. On approved/rejected decision: resumes or cancels the linked action
+ *      (via actionLedgerEntryId) and records the final ledger status.
  *   3. Emits audit event for every decision (including failed self-approve).
  *
  * Phase 4: Zod validation on all request bodies.
  */
 
 import { Router, type IRouter } from "express";
-import { db, approvalRequestsTable, actionLedgerTable } from "@workspace/db";
+import {
+  db,
+  approvalRequestsTable,
+  actionLedgerTable,
+  deploymentsTable,
+  environmentsTable,
+  packageVersionsTable,
+} from "@workspace/db";
 import { eq, and, count, desc } from "drizzle-orm";
-import { newApprovalRequestId } from "../lib/ids";
+import { newApprovalRequestId, newDeploymentId } from "../lib/ids";
 import { emitAuditEvent, auditEventTypes } from "../lib/audit";
 import {
   resolveTenantContext,
@@ -25,9 +32,340 @@ import {
   ApprovalDecisionBody,
   parseBody,
 } from "../lib/validation";
+import {
+  applyRuntimeLifecycleForStatus,
+  type DeploymentStatus,
+} from "../lib/runtimeLifecycle";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
+
+type ApprovalRequestRow = typeof approvalRequestsTable.$inferSelect;
+
+interface ApprovedExecutionResult {
+  status: "approved" | "executed" | "failed";
+  deploymentId?: string;
+  responsePayload: Record<string, unknown>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function readString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+async function executeApprovedAction({
+  tenantId,
+  approval,
+  reviewerId,
+  decidedAt,
+}: {
+  tenantId: string;
+  approval: ApprovalRequestRow;
+  reviewerId: string;
+  decidedAt: Date;
+}): Promise<ApprovedExecutionResult> {
+  const payload = asRecord(approval.requestPayload);
+
+  if (
+    approval.action === "deployment:create" &&
+    approval.resourceType === "environment"
+  ) {
+    const packageVersionId = readString(payload, "packageVersionId");
+    if (!packageVersionId) {
+      return {
+        status: "failed",
+        responsePayload: {
+          decision: "approved",
+          reviewerId,
+          decidedAt: decidedAt.toISOString(),
+          error: "Missing packageVersionId in approval payload",
+        },
+      };
+    }
+
+    const deploymentId = newDeploymentId();
+    const metadata = asRecord(payload["metadata"]);
+
+    const [environment] = await db
+      .select({ id: environmentsTable.id })
+      .from(environmentsTable)
+      .where(
+        and(
+          eq(environmentsTable.id, approval.resourceId),
+          eq(environmentsTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+
+    if (!environment) {
+      return {
+        status: "failed",
+        responsePayload: {
+          decision: "approved",
+          reviewerId,
+          decidedAt: decidedAt.toISOString(),
+          error: "Environment not found",
+        },
+      };
+    }
+
+    const [packageVersion] = await db
+      .select({ id: packageVersionsTable.id })
+      .from(packageVersionsTable)
+      .where(
+        and(
+          eq(packageVersionsTable.id, packageVersionId),
+          eq(packageVersionsTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+
+    if (!packageVersion) {
+      return {
+        status: "failed",
+        responsePayload: {
+          decision: "approved",
+          reviewerId,
+          decidedAt: decidedAt.toISOString(),
+          error: "Package version not found",
+        },
+      };
+    }
+
+    await db.insert(deploymentsTable).values({
+      id: deploymentId,
+      tenantId,
+      environmentId: approval.resourceId,
+      packageVersionId,
+      status: "pending",
+      metadata,
+    });
+
+    await emitAuditEvent({
+      tenantId,
+      actorId: reviewerId,
+      actorType: "user",
+      eventType: AET.deployment.created,
+      resourceType: "deployment",
+      resourceId: deploymentId,
+      payload: {
+        approvedFromRequest: approval.id,
+        environmentId: approval.resourceId,
+        packageVersionId,
+      },
+    });
+
+    return {
+      status: "executed",
+      deploymentId,
+      responsePayload: {
+        decision: "approved",
+        reviewerId,
+        decidedAt: decidedAt.toISOString(),
+        deploymentId,
+        executedAfterApproval: true,
+      },
+    };
+  }
+
+  if (
+    approval.action === "deployment:status_update" &&
+    approval.resourceType === "deployment"
+  ) {
+    const toStatus = readString(payload, "toStatus") as
+      | DeploymentStatus
+      | undefined;
+
+    if (!toStatus) {
+      return {
+        status: "failed",
+        deploymentId: approval.resourceId,
+        responsePayload: {
+          decision: "approved",
+          reviewerId,
+          decidedAt: decidedAt.toISOString(),
+          error: "Missing toStatus in approval payload",
+        },
+      };
+    }
+
+    const [existingDeployment] = await db
+      .select()
+      .from(deploymentsTable)
+      .where(
+        and(
+          eq(deploymentsTable.id, approval.resourceId),
+          eq(deploymentsTable.tenantId, tenantId),
+        ),
+      )
+      .limit(1);
+
+    if (!existingDeployment) {
+      return {
+        status: "failed",
+        deploymentId: approval.resourceId,
+        responsePayload: {
+          decision: "approved",
+          reviewerId,
+          decidedAt: decidedAt.toISOString(),
+          error: "Deployment not found",
+        },
+      };
+    }
+
+    const hasExplicitMetadata = payload["metadata"] !== undefined;
+    const baseMetadata = hasExplicitMetadata
+      ? asRecord(payload["metadata"])
+      : existingDeployment.metadata;
+    let lifecycle:
+      | Awaited<ReturnType<typeof applyRuntimeLifecycleForStatus>>
+      | undefined;
+
+    if (toStatus !== existingDeployment.status) {
+      try {
+        lifecycle = await applyRuntimeLifecycleForStatus({
+          metadata: baseMetadata,
+          status: toStatus,
+          now: decidedAt,
+        });
+      } catch (err) {
+        const details = err instanceof Error ? err.message : "Unknown error";
+
+        await emitAuditEvent({
+          tenantId,
+          actorId: reviewerId,
+          actorType: "user",
+          eventType: AET.runtime.lifecycleFailed,
+          resourceType: "deployment",
+          resourceId: approval.resourceId,
+          payload: {
+            approvedFromRequest: approval.id,
+            fromStatus: existingDeployment.status,
+            toStatus,
+            error: details,
+          },
+        });
+
+        return {
+          status: "failed",
+          deploymentId: approval.resourceId,
+          responsePayload: {
+            decision: "approved",
+            reviewerId,
+            decidedAt: decidedAt.toISOString(),
+            deploymentId: approval.resourceId,
+            toStatus,
+            error: "Runtime lifecycle update failed",
+            details,
+          },
+        };
+      }
+    }
+
+    const updates: Partial<typeof deploymentsTable.$inferInsert> = {
+      status: toStatus,
+      updatedAt: decidedAt,
+    };
+    if (lifecycle?.runtimeChanged) {
+      updates.metadata = lifecycle.metadata;
+    } else if (hasExplicitMetadata) {
+      updates.metadata = asRecord(payload["metadata"]);
+    }
+
+    const [deployment] = await db
+      .update(deploymentsTable)
+      .set(updates)
+      .where(
+        and(
+          eq(deploymentsTable.id, approval.resourceId),
+          eq(deploymentsTable.tenantId, tenantId),
+        ),
+      )
+      .returning({ id: deploymentsTable.id });
+
+    if (!deployment) {
+      return {
+        status: "failed",
+        deploymentId: approval.resourceId,
+        responsePayload: {
+          decision: "approved",
+          reviewerId,
+          decidedAt: decidedAt.toISOString(),
+          error: "Deployment not found",
+        },
+      };
+    }
+
+    if (lifecycle?.runtimeChanged) {
+      await emitAuditEvent({
+        tenantId,
+        actorId: reviewerId,
+        actorType: "user",
+        eventType: AET.runtime.lifecycleUpdated,
+        resourceType: "deployment",
+        resourceId: approval.resourceId,
+        payload: {
+          approvedFromRequest: approval.id,
+          fromStatus: existingDeployment.status,
+          toStatus,
+          runtimeAction: lifecycle.action,
+          runtime: lifecycle.runtime,
+        },
+      });
+    }
+
+    await emitAuditEvent({
+      tenantId,
+      actorId: reviewerId,
+      actorType: "user",
+      eventType: AET.deployment.statusUpdated,
+      resourceType: "deployment",
+      resourceId: approval.resourceId,
+      payload: {
+        approvedFromRequest: approval.id,
+        ...updates,
+      },
+    });
+
+    return {
+      status: "executed",
+      deploymentId: approval.resourceId,
+      responsePayload: {
+        decision: "approved",
+        reviewerId,
+        decidedAt: decidedAt.toISOString(),
+        deploymentId: approval.resourceId,
+        toStatus,
+        executedAfterApproval: true,
+        ...(lifecycle?.runtimeChanged
+          ? {
+              runtimeAction: lifecycle.action,
+              runtime: lifecycle.runtime,
+            }
+          : {}),
+      },
+    };
+  }
+
+  return {
+    status: "approved",
+    responsePayload: {
+      decision: "approved",
+      reviewerId,
+      decidedAt: decidedAt.toISOString(),
+      executionSkipped: true,
+      reason: "No executable handler for approval action",
+    },
+  };
+}
 
 router.use(resolveTenantContext);
 router.use(requireActiveTenant);
@@ -224,19 +562,36 @@ router.post("/:approvalId/decision", async (req, res, next) => {
 
     // ── Phase 3: Update linked action ledger entry ─────────────────────────────
     if (existing.actionLedgerEntryId) {
-      const ledgerStatus =
-        decision === "approved" ? "approved" : "cancelled";
+      const execution =
+        decision === "approved"
+          ? await executeApprovedAction({
+              tenantId,
+              approval: existing,
+              reviewerId,
+              decidedAt: now,
+            })
+          : {
+              status: "cancelled" as const,
+              responsePayload: {
+                decision,
+                reviewerId,
+                decidedAt: now.toISOString(),
+              },
+            };
+
+      const ledgerUpdate: Partial<typeof actionLedgerTable.$inferInsert> = {
+        status: execution.status,
+        completedAt: now,
+        responsePayload: execution.responsePayload,
+      };
+
+      if ("deploymentId" in execution && execution.deploymentId) {
+        ledgerUpdate.deploymentId = execution.deploymentId;
+      }
+
       await db
         .update(actionLedgerTable)
-        .set({
-          status: ledgerStatus,
-          completedAt: now,
-          responsePayload: {
-            decision,
-            reviewerId,
-            decidedAt: now.toISOString(),
-          },
-        })
+        .set(ledgerUpdate)
         .where(eq(actionLedgerTable.id, existing.actionLedgerEntryId));
 
       await emitAuditEvent({
@@ -246,7 +601,7 @@ router.post("/:approvalId/decision", async (req, res, next) => {
         eventType: AET.actionLedger.written,
         resourceType: "action_ledger_entry",
         resourceId: existing.actionLedgerEntryId,
-        payload: { status: ledgerStatus, approvalId },
+        payload: { status: execution.status, approvalId },
       });
     }
 

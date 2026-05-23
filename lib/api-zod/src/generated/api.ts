@@ -561,6 +561,95 @@ export const UpdateDeploymentResponse = zod.object({
 });
 
 /**
+ * @summary Provision a managed runtime for a deployment
+ */
+export const ProvisionDeploymentRuntimeParams = zod.object({
+  tenantId: zod.coerce.string(),
+  deploymentId: zod.coerce.string(),
+});
+
+export const provisionDeploymentRuntimeBodyProviderDefault = `docker-local`;
+export const provisionDeploymentRuntimeBodyActivateDefault = true;
+
+export const ProvisionDeploymentRuntimeBody = zod.object({
+  provider: zod
+    .enum(["docker-local", "managed-sandbox"])
+    .default(provisionDeploymentRuntimeBodyProviderDefault),
+  activate: zod
+    .boolean()
+    .default(provisionDeploymentRuntimeBodyActivateDefault),
+  configOverrides: zod
+    .record(zod.string(), zod.unknown())
+    .optional()
+    .describe(
+      "Optional runtime\/client overrides merged onto the agent version manifest.",
+    ),
+});
+
+export const ProvisionDeploymentRuntimeResponse = zod.object({
+  deployment: zod.object({
+    id: zod.string().describe("Prefixed ID: dep_{nanoid}"),
+    environmentId: zod.string(),
+    packageVersionId: zod.string(),
+    tenantId: zod.string(),
+    status: zod.enum(["pending", "active", "failed", "stopped"]),
+    configSnapshotId: zod.string().nullish(),
+    metadata: zod.record(zod.string(), zod.unknown()).optional(),
+    createdAt: zod.coerce.date(),
+    updatedAt: zod.coerce.date(),
+  }),
+  runtime: zod
+    .record(zod.string(), zod.unknown())
+    .describe("Managed runtime evidence recorded after provisioning."),
+  configSnapshot: zod
+    .object({
+      id: zod.string().describe("Prefixed ID: cfg_{nanoid}"),
+      deploymentId: zod.string(),
+      tenantId: zod.string(),
+      resolvedConfig: zod.record(zod.string(), zod.unknown()),
+      schemaVersion: zod.string(),
+      createdAt: zod.coerce.date(),
+    })
+    .describe(
+      "Immutable resolved config snapshot. Connector\/provider resolution is a future-phase placeholder — manifest fields are stored as-is.\n",
+    ),
+});
+
+/**
+ * @summary Get runtime status and latest config snapshot for a deployment
+ */
+export const GetDeploymentRuntimeParams = zod.object({
+  tenantId: zod.coerce.string(),
+  deploymentId: zod.coerce.string(),
+});
+
+export const GetDeploymentRuntimeResponse = zod.object({
+  deploymentId: zod.string(),
+  status: zod.enum(["pending", "active", "failed", "stopped"]),
+  runtime: zod.union([
+    zod
+      .record(zod.string(), zod.unknown())
+      .describe("Managed runtime evidence recorded after provisioning."),
+    zod.null(),
+  ]),
+  configSnapshot: zod.union([
+    zod
+      .object({
+        id: zod.string().describe("Prefixed ID: cfg_{nanoid}"),
+        deploymentId: zod.string(),
+        tenantId: zod.string(),
+        resolvedConfig: zod.record(zod.string(), zod.unknown()),
+        schemaVersion: zod.string(),
+        createdAt: zod.coerce.date(),
+      })
+      .describe(
+        "Immutable resolved config snapshot. Connector\/provider resolution is a future-phase placeholder — manifest fields are stored as-is.\n",
+      ),
+    zod.null(),
+  ]),
+});
+
+/**
  * @summary Resolve and store a config snapshot for a deployment
  */
 export const ResolveConfigSnapshotParams = zod.object({

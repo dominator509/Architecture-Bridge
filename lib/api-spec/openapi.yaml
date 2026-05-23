@@ -655,6 +655,57 @@ paths:
                 $ref: "#/components/schemas/ApiError"
 
   # ─── Config Snapshots (skeleton) ───────────────────────────────────────────
+  # Runtime provisioning endpoints share this section with config snapshots.
+  /tenants/{tenantId}/deployments/{deploymentId}/provision:
+    post:
+      operationId: provisionDeploymentRuntime
+      tags: [deployments]
+      summary: Provision a managed runtime for a deployment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/deploymentId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionDeploymentBody"
+      responses:
+        "200":
+          description: Runtime provisioned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvisionDeploymentResponse"
+        "404":
+          description: Deployment or package version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /tenants/{tenantId}/deployments/{deploymentId}/runtime:
+    get:
+      operationId: getDeploymentRuntime
+      tags: [deployments]
+      summary: Get runtime status and latest config snapshot for a deployment
+      parameters:
+        - $ref: "#/components/parameters/tenantId"
+        - $ref: "#/components/parameters/deploymentId"
+      responses:
+        "200":
+          description: Deployment runtime state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentRuntimeResponse"
+        "404":
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /tenants/{tenantId}/deployments/{deploymentId}/config-snapshot:
     post:
       operationId: resolveConfigSnapshot
@@ -1506,6 +1557,56 @@ components:
           type: string
           default: "1.0"
       required: []
+
+    RuntimeState:
+      type: object
+      additionalProperties: true
+      description: Managed runtime evidence recorded after provisioning.
+
+    ProvisionDeploymentBody:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [docker-local, managed-sandbox]
+          default: docker-local
+        activate:
+          type: boolean
+          default: true
+        configOverrides:
+          type: object
+          additionalProperties: true
+          description: Optional runtime/client overrides merged onto the agent version manifest.
+      required: []
+
+    ProvisionDeploymentResponse:
+      type: object
+      properties:
+        deployment:
+          $ref: "#/components/schemas/Deployment"
+        runtime:
+          $ref: "#/components/schemas/RuntimeState"
+        configSnapshot:
+          $ref: "#/components/schemas/ConfigSnapshot"
+      required: [deployment, runtime, configSnapshot]
+
+    DeploymentRuntimeResponse:
+      type: object
+      properties:
+        deploymentId:
+          type: string
+        status:
+          type: string
+          enum: [pending, active, failed, stopped]
+        runtime:
+          oneOf:
+            - $ref: "#/components/schemas/RuntimeState"
+            - type: "null"
+        configSnapshot:
+          oneOf:
+            - $ref: "#/components/schemas/ConfigSnapshot"
+            - type: "null"
+      required: [deploymentId, status, runtime, configSnapshot]
 
     # ── AuditEvent ────────────────────────────────────────────────────────────
     AuditEvent:

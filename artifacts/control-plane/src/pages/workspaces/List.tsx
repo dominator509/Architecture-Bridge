@@ -147,7 +147,7 @@ export default function WorkspaceList() {
               {filtered.map(w => (
                 <tr key={w.id} className="hover:bg-muted/50 transition-colors">
                   <td className="px-6 py-4 font-medium">
-                    <Link href={`/tenants/${tenantId}/workspaces/${w.id}`} className="text-primary hover:underline" data-testid={`link-workspace-${w.id}`}>
+                    <Link href={`/workspaces/${w.id}`} className="text-primary hover:underline" data-testid={`link-workspace-${w.id}`}>
                       {w.name}
                     </Link>
                   </td>
