@@ -18,6 +18,16 @@ interface DockerContainerInspectResponse {
   State?: {
     Status?: string;
     Running?: boolean;
+    Health?: {
+      Status?: string;
+      FailingStreak?: number;
+      Log?: Array<{
+        Start?: string;
+        End?: string;
+        ExitCode?: number;
+        Output?: string;
+      }>;
+    };
   };
   NetworkSettings?: {
     Ports?: Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>;
@@ -37,6 +47,7 @@ export interface DockerRuntimeInput {
 
 export interface DockerRuntimeResult {
   endpoint?: string;
+  readiness: DockerRuntimeReadiness;
   docker: {
     containerId: string;
     containerName: string;
@@ -44,7 +55,17 @@ export interface DockerRuntimeResult {
     internalPort: number;
     hostPort?: string;
     state?: string;
+    health?: string;
   };
+}
+
+export interface DockerRuntimeReadiness {
+  ready: boolean;
+  checkedAt: string;
+  attempts: number;
+  timeoutMs: number;
+  health?: string;
+  error?: string;
 }
 
 export interface DockerRuntimeMetadata {
@@ -57,6 +78,7 @@ export interface DockerRuntimeMetadata {
     state?: string;
     checks?: Record<string, unknown>;
   };
+  readiness?: DockerRuntimeReadiness;
   events?: unknown[];
   docker?: {
     containerId?: string;
@@ -65,6 +87,7 @@ export interface DockerRuntimeMetadata {
     internalPort?: number;
     hostPort?: string;
     state?: string;
+    health?: string;
   };
   [key: string]: unknown;
 }
@@ -73,6 +96,20 @@ export type DockerRuntimeAction = "start" | "stop" | "restart";
 
 function dockerSocketPath() {
   return process.env["DOCKER_SOCKET_PATH"] ?? DEFAULT_DOCKER_SOCKET;
+}
+
+function readinessTimeoutMs() {
+  const parsed = Number(process.env["DOCKER_RUNTIME_READINESS_TIMEOUT_MS"]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000;
+}
+
+function readinessIntervalMs() {
+  const parsed = Number(process.env["DOCKER_RUNTIME_READINESS_INTERVAL_MS"]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 500;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isExpected(statusCode: number, expected: number[]) {
@@ -187,6 +224,103 @@ function runtimeCommand() {
   ];
 }
 
+function healthcheckCommand() {
+  return [
+    "CMD-SHELL",
+    [
+      "node -e",
+      `"fetch('http://127.0.0.1:8080').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,
+    ].join(" "),
+  ];
+}
+
+function dockerHealthStatus(inspected: DockerContainerInspectResponse) {
+  return inspected.State?.Health?.Status;
+}
+
+function latestHealthOutput(inspected: DockerContainerInspectResponse) {
+  const logs = inspected.State?.Health?.Log ?? [];
+  return logs[logs.length - 1]?.Output?.trim();
+}
+
+function dockerStateToRuntimeStatus(
+  inspected: DockerContainerInspectResponse,
+): "healthy" | "starting" | "unhealthy" | "stopped" {
+  if (!inspected.State?.Running) return "stopped";
+
+  const health = dockerHealthStatus(inspected);
+  if (health === "healthy") return "healthy";
+  if (health === "unhealthy") return "unhealthy";
+  if (health === "starting") return "starting";
+
+  return "healthy";
+}
+
+function readinessError(inspected: DockerContainerInspectResponse) {
+  if (!inspected.State?.Running) {
+    return `Container is ${inspected.State?.Status ?? "not running"}`;
+  }
+
+  if (dockerHealthStatus(inspected) === "unhealthy") {
+    return latestHealthOutput(inspected) ?? "Container healthcheck is unhealthy";
+  }
+
+  return "Runtime did not become ready before the timeout";
+}
+
+async function inspectContainer(container: string) {
+  return dockerRequest<DockerContainerInspectResponse>({
+    method: "GET",
+    path: `/containers/${encodeURIComponent(container)}/json`,
+    expected: [200],
+  });
+}
+
+async function waitForContainerReadiness(container: string): Promise<{
+  inspected: DockerContainerInspectResponse;
+  readiness: DockerRuntimeReadiness;
+}> {
+  const timeoutMs = readinessTimeoutMs();
+  const intervalMs = readinessIntervalMs();
+  const deadline = Date.now() + timeoutMs;
+  let attempts = 0;
+  let inspected = await inspectContainer(container);
+
+  while (Date.now() <= deadline) {
+    attempts += 1;
+    inspected = await inspectContainer(container);
+    const status = dockerStateToRuntimeStatus(inspected);
+    const health = dockerHealthStatus(inspected);
+
+    if (status === "healthy") {
+      return {
+        inspected,
+        readiness: {
+          ready: true,
+          checkedAt: new Date().toISOString(),
+          attempts,
+          timeoutMs,
+          health,
+        },
+      };
+    }
+
+    await sleep(intervalMs);
+  }
+
+  return {
+    inspected,
+    readiness: {
+      ready: false,
+      checkedAt: new Date().toISOString(),
+      attempts,
+      timeoutMs,
+      health: dockerHealthStatus(inspected),
+      error: readinessError(inspected),
+    },
+  };
+}
+
 export async function provisionDockerRuntime(
   input: DockerRuntimeInput,
 ): Promise<DockerRuntimeResult> {
@@ -227,6 +361,13 @@ export async function provisionDockerRuntime(
     ExposedPorts: {
       [RUNTIME_PORT]: {},
     },
+    Healthcheck: {
+      Test: healthcheckCommand(),
+      Interval: 1_000_000_000,
+      Timeout: 1_000_000_000,
+      Retries: 10,
+      StartPeriod: 1_000_000_000,
+    },
     HostConfig: {
       PortBindings: {
         [RUNTIME_PORT]: [{ HostPort: "" }],
@@ -263,15 +404,16 @@ export async function provisionDockerRuntime(
     expected: [204, 304],
   });
 
-  const inspected = await dockerRequest<DockerContainerInspectResponse>({
-    method: "GET",
-    path: `/containers/${created.Id}/json`,
-    expected: [200],
-  });
+  const { inspected, readiness } = await waitForContainerReadiness(created.Id);
+  if (!readiness.ready) {
+    throw new Error(readiness.error ?? "Docker runtime failed readiness checks");
+  }
+
   const port = inspected.NetworkSettings?.Ports?.[RUNTIME_PORT]?.[0]?.HostPort;
 
   return {
     endpoint: port ? `http://localhost:${port}` : undefined,
+    readiness,
     docker: {
       containerId: inspected.Id,
       containerName,
@@ -279,18 +421,13 @@ export async function provisionDockerRuntime(
       internalPort: 8080,
       hostPort: port,
       state: inspected.State?.Status,
+      health: dockerHealthStatus(inspected),
     },
   };
 }
 
 function dockerContainerRef(runtime: DockerRuntimeMetadata) {
   return runtime.docker?.containerId ?? runtime.docker?.containerName;
-}
-
-function dockerStateToRuntimeStatus(
-  inspected: DockerContainerInspectResponse,
-): "healthy" | "stopped" {
-  return inspected.State?.Running ? "healthy" : "stopped";
 }
 
 function dockerPort(inspected: DockerContainerInspectResponse) {
@@ -327,20 +464,38 @@ export async function applyDockerRuntimeAction(
     });
   }
 
-  const inspected = await dockerRequest<DockerContainerInspectResponse>({
-    method: "GET",
-    path: `/containers/${encodedContainer}/json`,
-    expected: [200],
-  });
+  const readiness =
+    action === "stop"
+      ? undefined
+      : await waitForContainerReadiness(container);
+  const inspected = readiness?.inspected ?? (await inspectContainer(container));
+  if (readiness && !readiness.readiness.ready) {
+    throw new Error(
+      readiness.readiness.error ?? "Docker runtime failed readiness checks",
+    );
+  }
+
   const port = dockerPort(inspected);
   const status = dockerStateToRuntimeStatus(inspected);
   const now = new Date().toISOString();
+  const runtimeReadiness =
+    readiness?.readiness ??
+    (action === "stop"
+      ? {
+          ready: false,
+          checkedAt: now,
+          attempts: 0,
+          timeoutMs: 0,
+          health: dockerHealthStatus(inspected),
+        }
+      : runtime.readiness);
 
   return {
     ...runtime,
     endpoint: port ? `http://localhost:${port}` : runtime.endpoint,
     status,
     lastHealthCheckAt: now,
+    readiness: runtimeReadiness,
     docker: {
       containerId: inspected.Id,
       containerName: runtime.docker?.containerName ?? container,
@@ -348,6 +503,7 @@ export async function applyDockerRuntimeAction(
       internalPort: runtime.docker?.internalPort ?? 8080,
       hostPort: port,
       state: inspected.State?.Status,
+      health: dockerHealthStatus(inspected),
     },
     health: {
       ...runtime.health,
@@ -355,6 +511,10 @@ export async function applyDockerRuntimeAction(
       checks: {
         ...(runtime.health?.checks ?? {}),
         dockerContainerStarted: inspected.State?.Running === true,
+        dockerHealthStatus: dockerHealthStatus(inspected),
+        runtimeReady: runtimeReadiness?.ready ?? false,
+        runtimeReadinessAttempts: runtimeReadiness?.attempts,
+        runtimeReadinessTimeoutMs: runtimeReadiness?.timeoutMs,
       },
     },
     events: [

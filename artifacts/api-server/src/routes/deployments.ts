@@ -174,6 +174,14 @@ function buildManagedRuntime({
     readNestedString(config, ["runtime", "image"]) ??
     process.env["AGENT_RUNTIME_IMAGE"] ??
     "node:22-alpine";
+  const healthChecks: Record<string, unknown> = {
+    configResolved: true,
+    modelConfigured: Boolean(model),
+    toolCount: tools.length,
+    clientConfigured: Boolean(client["name"]),
+    runtimeConfigured: Object.keys(runtime).length > 0,
+    dockerContainerStarted: provider !== "docker-local",
+  };
 
   return {
     id: newRuntimeId(),
@@ -196,14 +204,7 @@ function buildManagedRuntime({
     objective: readNestedString(config, ["objective"]),
     health: {
       state: provider === "docker-local" ? "provisioning" : "healthy",
-      checks: {
-        configResolved: true,
-        modelConfigured: Boolean(model),
-        toolCount: tools.length,
-        clientConfigured: Boolean(client["name"]),
-        runtimeConfigured: Object.keys(runtime).length > 0,
-        dockerContainerStarted: provider !== "docker-local",
-      },
+      checks: healthChecks,
     },
     events: [
       {
@@ -320,22 +321,27 @@ router.post("/deployments/:deploymentId/provision", async (req, res, next) => {
           runtime = {
             ...runtime,
             ...dockerRuntime,
-            status: "healthy",
-            lastHealthCheckAt: new Date().toISOString(),
+            status: dockerRuntime.readiness.ready ? "healthy" : "failed",
+            lastHealthCheckAt: dockerRuntime.readiness.checkedAt,
             health: {
               ...runtime.health,
-              state: "healthy",
+              state: dockerRuntime.readiness.ready ? "healthy" : "failed",
               checks: {
-                ...runtime.health.checks,
+                ...(runtime.health.checks as Record<string, unknown>),
                 dockerContainerStarted: true,
-              },
+                dockerHealthStatus: dockerRuntime.docker.health,
+                runtimeReady: dockerRuntime.readiness.ready,
+                runtimeReadinessAttempts: dockerRuntime.readiness.attempts,
+                runtimeReadinessTimeoutMs: dockerRuntime.readiness.timeoutMs,
+              } as Record<string, unknown>,
             },
             events: [
               ...runtime.events,
               {
-                at: new Date().toISOString(),
+                at: dockerRuntime.readiness.checkedAt,
                 level: "info",
-                message: "Docker runtime container started",
+                message:
+                  "Docker runtime container started and passed readiness checks",
               },
             ],
           };

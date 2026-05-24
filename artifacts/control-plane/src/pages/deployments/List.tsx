@@ -11,6 +11,9 @@ import {
   listEnvironments,
   listPackageVersions,
   useCreateDeployment,
+  useCreateEnvironment,
+  useCreatePackageVersion,
+  useCreateWorkspace,
   useListAllDeployments,
   useListPackages,
   useListWorkspaces,
@@ -296,7 +299,7 @@ export default function DeploymentList() {
   const selectedEnvironment = environmentsById.get(selectedEnvironmentId);
   const selectedWorkspace = selectedEnvironment
     ? workspacesById.get(selectedEnvironment.workspaceId)
-    : undefined;
+    : workspacesById.get(selectedWorkspaceId);
 
   useEffect(() => {
     if (!selectedWorkspaceId && workspaces.length > 0) {
@@ -357,8 +360,115 @@ export default function DeploymentList() {
   }, [clientName, isCreateOpen, selectedAgent]);
 
   const createMutation = useCreateDeployment();
+  const createWorkspaceMutation = useCreateWorkspace();
+  const createEnvironmentMutation = useCreateEnvironment();
+  const createVersionMutation = useCreatePackageVersion();
   const updateMutation = useUpdateDeployment();
   const provisionMutation = useProvisionDeploymentRuntime();
+
+  const handleCreateDefaultTarget = async () => {
+    try {
+      const suffix = Date.now().toString(36);
+      let workspaceId = selectedWorkspaceId;
+
+      if (!workspaceId) {
+        const workspace = await createWorkspaceMutation.mutateAsync({
+          tenantId,
+          data: {
+            name: "Client Workspace",
+            slug: `client-workspace-${suffix}`,
+          },
+        });
+        workspaceId = workspace.id;
+        setSelectedWorkspaceId(workspace.id);
+      }
+
+      const environment = await createEnvironmentMutation.mutateAsync({
+        tenantId,
+        workspaceId,
+        data: {
+          name: "Local Docker",
+          slug: `local-docker-${suffix}`,
+          type: "development",
+        },
+      });
+
+      setSelectedEnvironmentId(environment.id);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: getListWorkspacesQueryKey(tenantId, { limit: 200 }),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: getListEnvironmentsQueryKey(tenantId, workspaceId, {
+            limit: 200,
+          }),
+        }),
+      ]);
+      toast({
+        title: "Deployment target created",
+        description: `${environment.name} is ready for this agent.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to create deployment target",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handlePublishStarterVersion = async () => {
+    if (!selectedPackageId) {
+      toast({
+        title: "Choose an agent first",
+        description: "Create or choose an agent before publishing a version.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const versionName = "1.0.0";
+      const created = await createVersionMutation.mutateAsync({
+        tenantId,
+        packageId: selectedPackageId,
+        data: {
+          version: versionName,
+          status: "published",
+          manifest: {
+            type: "agent",
+            model,
+            capabilities: splitTools(tools),
+            instructions:
+              objective.trim() ||
+              "Follow the configured client objective and escalate uncertain actions.",
+            guardrails:
+              escalationContact.trim()
+                ? `Escalate to ${escalationContact.trim()} before external sends or destructive actions.`
+                : "Require approval before external sends or destructive actions.",
+            configSchemaVersion: "agent-template/v1",
+          },
+        },
+      });
+
+      setSelectedPackageVersionId(created.id);
+      queryClient.invalidateQueries({
+        queryKey: getListPackageVersionsQueryKey(tenantId, selectedPackageId, {
+          limit: 200,
+        }),
+      });
+      toast({
+        title: "Starter version published",
+        description: `${created.version} is available for deployment.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to publish starter version",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
 
   const resetWizard = () => {
     setClientName("");
@@ -604,6 +714,15 @@ export default function DeploymentList() {
     createMutation.isPending ||
     provisionMutation.isPending ||
     updateMutation.isPending;
+  const isSetupBusy =
+    createWorkspaceMutation.isPending ||
+    createEnvironmentMutation.isPending ||
+    createVersionMutation.isPending;
+  const needsWorkspace = workspaces.length === 0;
+  const needsEnvironment =
+    workspaces.length > 0 && selectedEnvironmentOptions.length === 0;
+  const needsAgent = packages.length === 0;
+  const needsVersion = Boolean(selectedPackageId) && selectedVersionOptions.length === 0;
 
   return (
     <div className="p-8">
@@ -702,6 +821,67 @@ export default function DeploymentList() {
                   </Select>
                 </div>
               </div>
+
+              {(needsWorkspace || needsEnvironment || needsAgent || needsVersion) && (
+                <div className="rounded-md border bg-muted/30 p-4 text-sm">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div>
+                        <p className="font-medium">Deployment setup needed</p>
+                        <p className="mt-1 text-muted-foreground">
+                          {needsAgent
+                            ? "Create an agent before deploying."
+                            : needsWorkspace
+                              ? "This tenant needs a workspace and environment before an agent can be deployed."
+                              : needsEnvironment
+                                ? "The selected workspace needs an environment before an agent can be deployed."
+                                : "The selected agent needs a published version before it can be deployed."}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {(needsWorkspace || needsEnvironment) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleCreateDefaultTarget}
+                            disabled={isSetupBusy}
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            Create Local Target
+                          </Button>
+                        )}
+                        {needsVersion && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handlePublishStarterVersion}
+                            disabled={isSetupBusy}
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            Publish Starter Version
+                          </Button>
+                        )}
+                        {needsAgent && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              window.location.href = `/tenants/${tenantId}/packages`;
+                            }}
+                          >
+                            <Bot className="mr-2 h-4 w-4" />
+                            Go to Agents
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -818,6 +998,7 @@ export default function DeploymentList() {
                   type="submit"
                   disabled={
                     isDeploying ||
+                    isSetupBusy ||
                     !selectedEnvironmentId ||
                     !selectedPackageVersionId
                   }
