@@ -286,6 +286,7 @@ export default function PackageDetail() {
                 <th className="px-6 py-3 font-medium text-muted-foreground">Capabilities</th>
                 <th className="px-6 py-3 font-medium text-muted-foreground">Status</th>
                 <th className="px-6 py-3 text-right font-medium text-muted-foreground">Created</th>
+                <th className="px-6 py-3 text-right font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -317,6 +318,18 @@ export default function PackageDetail() {
                     </td>
                     <td className="px-6 py-4 text-right text-muted-foreground">
                       {new Date(agentVersion.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <Button
+                        asChild
+                        size="sm"
+                        variant="outline"
+                        disabled={agentVersion.status !== "published"}
+                      >
+                        <Link href={`/deployments?agent=${packageId}&version=${agentVersion.id}`}>
+                          <Rocket className="mr-2 h-4 w-4" /> Deploy
+                        </Link>
+                      </Button>
                     </td>
                   </tr>
                 );

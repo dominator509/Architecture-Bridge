@@ -324,6 +324,7 @@ export default function DeploymentList() {
     if (deployIntentApplied.current || packages.length === 0) return;
     const query = new URLSearchParams(window.location.search);
     const agentId = query.get("agent");
+    const versionId = query.get("version");
     if (!agentId) return;
 
     const agent = packages.find((pkg) => pkg.id === agentId);
@@ -331,6 +332,7 @@ export default function DeploymentList() {
 
     deployIntentApplied.current = true;
     setSelectedPackageId(agent.id);
+    if (versionId) setSelectedPackageVersionId(versionId);
     setIsCreateOpen(true);
   }, [packages]);
 
