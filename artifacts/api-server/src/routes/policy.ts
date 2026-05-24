@@ -20,6 +20,7 @@ import {
   requireActiveTenant,
 } from "../lib/tenantContext";
 import { EvaluatePolicyBody, parseBody } from "../lib/validation";
+import { parsePaginationQuery } from "../lib/queryParams";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -91,8 +92,12 @@ router.get("/decisions", async (req, res, next) => {
       string,
       string | undefined
     >;
-    const limit = Math.min(Number(req.query["limit"] ?? 100), 500);
-    const offset = Number(req.query["offset"] ?? 0);
+    const pagination = parsePaginationQuery(req, res, {
+      defaultLimit: 100,
+      maxLimit: 500,
+    });
+    if (!pagination) return;
+    const { limit, offset } = pagination;
 
     const conditions = [eq(policyDecisionsTable.tenantId, tenantId)];
     if (outcome)

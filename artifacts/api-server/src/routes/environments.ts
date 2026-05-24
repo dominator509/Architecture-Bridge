@@ -12,6 +12,7 @@ import {
   UpdateEnvironmentBody,
   parseBody,
 } from "../lib/validation";
+import { parsePaginationQuery } from "../lib/queryParams";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -99,8 +100,12 @@ router.get("/", async (req, res, next) => {
     const params = req.params as Record<string, string>;
     const workspaceId = params["workspaceId"]!;
     const type = req.query["type"] as string | undefined;
-    const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
-    const offset = Number(req.query["offset"] ?? 0);
+    const pagination = parsePaginationQuery(req, res, {
+      defaultLimit: 50,
+      maxLimit: 200,
+    });
+    if (!pagination) return;
+    const { limit, offset } = pagination;
 
     const conditions = [
       eq(environmentsTable.workspaceId, workspaceId),

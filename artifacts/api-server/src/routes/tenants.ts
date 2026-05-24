@@ -19,6 +19,7 @@ import {
   UpdateTenantBody,
   parseBody,
 } from "../lib/validation";
+import { parsePaginationQuery } from "../lib/queryParams";
 
 const router: IRouter = Router();
 const AET = auditEventTypes();
@@ -68,8 +69,12 @@ router.post("/tenants", async (req, res, next) => {
 router.get("/tenants", async (req, res, next) => {
   try {
     const status = req.query["status"] as string | undefined;
-    const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
-    const offset = Number(req.query["offset"] ?? 0);
+    const pagination = parsePaginationQuery(req, res, {
+      defaultLimit: 50,
+      maxLimit: 200,
+    });
+    if (!pagination) return;
+    const { limit, offset } = pagination;
 
     const where = status
       ? eq(tenantsTable.status, status as "active" | "suspended" | "deleted")

@@ -12,6 +12,7 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import { parseDateQueryParam, parsePaginationQuery } from "../lib/queryParams";
 
 const router: IRouter = Router({ mergeParams: true });
 
@@ -22,12 +23,18 @@ router.use(requireActiveTenant);
 router.get("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
-    const { deploymentId, actorId, status, since } = req.query as Record<
+    const { deploymentId, actorId, status } = req.query as Record<
       string,
       string | undefined
     >;
-    const limit = Math.min(Number(req.query["limit"] ?? 100), 500);
-    const offset = Number(req.query["offset"] ?? 0);
+    const pagination = parsePaginationQuery(req, res, {
+      defaultLimit: 100,
+      maxLimit: 500,
+    });
+    if (!pagination) return;
+    const sinceDate = parseDateQueryParam(req, res, "since");
+    if (sinceDate === null) return;
+    const { limit, offset } = pagination;
 
     const conditions = [eq(actionLedgerTable.tenantId, tenantId)];
     if (deploymentId)
@@ -47,8 +54,7 @@ router.get("/", async (req, res, next) => {
             | "failed",
         ),
       );
-    if (since)
-      conditions.push(gte(actionLedgerTable.createdAt, new Date(since)));
+    if (sinceDate) conditions.push(gte(actionLedgerTable.createdAt, sinceDate));
 
     const where = and(...conditions);
 

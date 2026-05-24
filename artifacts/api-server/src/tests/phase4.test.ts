@@ -369,6 +369,26 @@ describe("§2 Input validation — Zod schemas on all POST/PATCH routes", () => 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("VALIDATION_ERROR");
   });
+
+  it("2g. GET list routes reject malformed pagination query params", async () => {
+    const invalidLimit = await request(app).get(`${BASE}/workspaces?limit=abc`);
+    expect(invalidLimit.status).toBe(400);
+    expect(invalidLimit.body.code).toBe("VALIDATION_ERROR");
+
+    const invalidOffset = await request(app).get(
+      `${BASE}/deployments?offset=-5`,
+    );
+    expect(invalidOffset.status).toBe(400);
+    expect(invalidOffset.body.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("2h. GET list routes reject malformed date query params", async () => {
+    const invalidSince = await request(app).get(
+      `${BASE}/audit-events?since=notadate`,
+    );
+    expect(invalidSince.status).toBe(400);
+    expect(invalidSince.body.code).toBe("VALIDATION_ERROR");
+  });
 });
 
 // ── §3 Health check ────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
   UpdateWorkspaceBody,
   parseBody,
 } from "../lib/validation";
+import { parsePaginationQuery } from "../lib/queryParams";
 
 const router: IRouter = Router({ mergeParams: true });
 const AET = auditEventTypes();
@@ -70,8 +71,12 @@ router.get("/", async (req, res, next) => {
   try {
     const tenantId = res.locals.tenantId!;
     const status = req.query["status"] as string | undefined;
-    const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
-    const offset = Number(req.query["offset"] ?? 0);
+    const pagination = parsePaginationQuery(req, res, {
+      defaultLimit: 50,
+      maxLimit: 200,
+    });
+    if (!pagination) return;
+    const { limit, offset } = pagination;
 
     const conditions = [eq(workspacesTable.tenantId, tenantId)];
     if (status) {

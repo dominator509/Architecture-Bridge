@@ -5,6 +5,7 @@ import {
   resolveTenantContext,
   requireActiveTenant,
 } from "../lib/tenantContext";
+import { parseDateQueryParam, parsePaginationQuery } from "../lib/queryParams";
 
 const router: IRouter = Router({ mergeParams: true });
 
@@ -19,11 +20,17 @@ router.get("/", async (req, res, next) => {
       resourceId,
       actorId,
       eventType,
-      since,
-      until,
     } = req.query as Record<string, string | undefined>;
-    const limit = Math.min(Number(req.query["limit"] ?? 100), 500);
-    const offset = Number(req.query["offset"] ?? 0);
+    const pagination = parsePaginationQuery(req, res, {
+      defaultLimit: 100,
+      maxLimit: 500,
+    });
+    if (!pagination) return;
+    const sinceDate = parseDateQueryParam(req, res, "since");
+    if (sinceDate === null) return;
+    const untilDate = parseDateQueryParam(req, res, "until");
+    if (untilDate === null) return;
+    const { limit, offset } = pagination;
 
     const conditions = [eq(auditEventsTable.tenantId, tenantId)];
     if (resourceType)
@@ -32,10 +39,8 @@ router.get("/", async (req, res, next) => {
       conditions.push(eq(auditEventsTable.resourceId, resourceId));
     if (actorId) conditions.push(eq(auditEventsTable.actorId, actorId));
     if (eventType) conditions.push(eq(auditEventsTable.eventType, eventType));
-    if (since)
-      conditions.push(gte(auditEventsTable.createdAt, new Date(since)));
-    if (until)
-      conditions.push(lte(auditEventsTable.createdAt, new Date(until)));
+    if (sinceDate) conditions.push(gte(auditEventsTable.createdAt, sinceDate));
+    if (untilDate) conditions.push(lte(auditEventsTable.createdAt, untilDate));
 
     const where = and(...conditions);
 
