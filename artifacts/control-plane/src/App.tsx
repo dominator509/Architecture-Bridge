@@ -10,6 +10,7 @@ import TenantDetail from "@/pages/tenants/Detail";
 import WorkspaceList from "@/pages/workspaces/List";
 import WorkspaceDetail from "@/pages/workspaces/Detail";
 import EnvironmentDetail from "@/pages/environments/Detail";
+import AssistantBuildCatalog from "@/pages/assistant-builds/Catalog";
 import PackageList from "@/pages/packages/List";
 import PackageDetail from "@/pages/packages/Detail";
 import DeploymentList from "@/pages/deployments/List";
@@ -43,6 +44,7 @@ function TenantRoutes() {
             <Route path="/workspaces/:workspaceId/environments/:environmentId" component={EnvironmentDetail} />
 
             {/* Packages */}
+            <Route path="/assistant-builds" component={AssistantBuildCatalog} />
             <Route path="/packages" component={PackageList} />
             <Route path="/packages/:packageId" component={PackageDetail} />
 

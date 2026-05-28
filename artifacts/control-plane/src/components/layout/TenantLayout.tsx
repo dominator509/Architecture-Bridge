@@ -12,6 +12,7 @@ import {
   Server,
   BookOpen,
   Menu,
+  Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import {
 const navItems = [
   { href: "", label: "Overview", icon: LayoutDashboard, end: true },
   { href: "/workspaces", label: "Workspaces", icon: Box },
+  { href: "/assistant-builds", label: "Build Catalog", icon: Rocket },
   { href: "/packages", label: "Agents", icon: Bot },
   { href: "/deployments", label: "Deployments", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: ShieldCheck },

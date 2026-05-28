@@ -18,6 +18,7 @@ import {
   useListPackages,
   useListWorkspaces,
   useProvisionDeploymentRuntime,
+  useResolveConfigSnapshot,
   useUpdateDeployment,
   type Deployment,
   type DeploymentRuntimeResponse,
@@ -32,6 +33,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  Code2,
   ExternalLink,
   Play,
   Plus,
@@ -75,6 +77,8 @@ type DeploymentResult = Deployment & {
   reason?: string;
   code?: string;
 };
+
+type RuntimeProvider = "docker-local" | "managed-sandbox";
 
 function getErrorBody(err: unknown): Record<string, unknown> {
   const error = err as {
@@ -144,6 +148,38 @@ function formatRuntimeTime(value?: string) {
   });
 }
 
+function getResolvedConfig(runtime?: DeploymentRuntimeResponse) {
+  const snapshot = asRecord(runtime?.configSnapshot);
+  return asRecord(snapshot?.resolvedConfig);
+}
+
+function configDraftForDeployment(
+  deployment: Deployment,
+  runtime?: DeploymentRuntimeResponse,
+) {
+  const resolvedConfig = getResolvedConfig(runtime);
+  const metadata = asRecord(deployment.metadata) ?? {};
+
+  return JSON.stringify(
+    resolvedConfig ?? {
+      runtime: asRecord(metadata.runtime) ?? {
+        model: readString(metadata, "model") ?? "gpt-5.2",
+      },
+      client: {
+        name: readString(metadata, "clientName") ?? "Client",
+        escalationContact: readString(metadata, "escalationContact") ?? "",
+      },
+      objective: readString(metadata, "objective") ?? "",
+      tools: Array.isArray(metadata.tools) ? metadata.tools : [],
+      deployment: {
+        metadata,
+      },
+    },
+    null,
+    2,
+  );
+}
+
 export default function DeploymentList() {
   const params = useParams<{ tenantId: string }>();
   const tenantId = params.tenantId || "";
@@ -162,6 +198,11 @@ export default function DeploymentList() {
   const [escalationContact, setEscalationContact] = useState("");
   const [provisionError, setProvisionError] = useState<Error | null>(null);
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
+  const [configDeployment, setConfigDeployment] = useState<Deployment | null>(null);
+  const [configDraft, setConfigDraft] = useState("");
+  const [configProvider, setConfigProvider] =
+    useState<RuntimeProvider>("managed-sandbox");
+  const [configError, setConfigError] = useState("");
   const deployIntentApplied = useRef(false);
 
   const { data, isLoading } = useListAllDeployments(
@@ -365,6 +406,7 @@ export default function DeploymentList() {
   const createVersionMutation = useCreatePackageVersion();
   const updateMutation = useUpdateDeployment();
   const provisionMutation = useProvisionDeploymentRuntime();
+  const resolveConfigMutation = useResolveConfigSnapshot();
 
   const handleCreateDefaultTarget = async () => {
     try {
@@ -710,10 +752,81 @@ export default function DeploymentList() {
     }
   };
 
+  const openConfigEditor = (deployment: Deployment) => {
+    const liveRuntime = runtimeByDeploymentId.get(deployment.id);
+    const runtime = asRecord(liveRuntime?.runtime) ?? getRuntimeMetadata(deployment);
+    const providerValue = readString(runtime, "provider");
+    setConfigDeployment(deployment);
+    setConfigDraft(configDraftForDeployment(deployment, liveRuntime));
+    setConfigProvider(
+      providerValue === "docker-local" ? "docker-local" : "managed-sandbox",
+    );
+    setConfigError("");
+  };
+
+  const handleSaveConfig = async () => {
+    if (!configDeployment) return;
+
+    let parsed: Record<string, unknown>;
+    try {
+      const value = JSON.parse(configDraft) as unknown;
+      const record = asRecord(value);
+      if (!record) throw new Error("Config must be a JSON object");
+      parsed = record;
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Invalid JSON");
+      return;
+    }
+
+    setConfigError("");
+    setRuntimeActionId(configDeployment.id);
+    try {
+      await resolveConfigMutation.mutateAsync({
+        tenantId,
+        deploymentId: configDeployment.id,
+        data: {
+          schemaVersion: "assistant-build/v1",
+          configOverrides: parsed,
+        },
+      });
+      await provisionMutation.mutateAsync({
+        tenantId,
+        deploymentId: configDeployment.id,
+        data: {
+          provider: configProvider,
+          activate: true,
+          configOverrides: parsed,
+        },
+      });
+
+      await queryClient.invalidateQueries({
+        queryKey: getListAllDeploymentsQueryKey(tenantId, {}),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: getGetDeploymentRuntimeQueryKey(tenantId, configDeployment.id),
+      });
+      toast({
+        title: "Config applied",
+        description: "The config snapshot was updated and the runtime was re-provisioned.",
+      });
+      setConfigDeployment(null);
+      setConfigDraft("");
+    } catch (err) {
+      toast({
+        title: "Failed to apply config",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    } finally {
+      setRuntimeActionId(null);
+    }
+  };
+
   const isDeploying =
     createMutation.isPending ||
     provisionMutation.isPending ||
-    updateMutation.isPending;
+    updateMutation.isPending ||
+    resolveConfigMutation.isPending;
   const isSetupBusy =
     createWorkspaceMutation.isPending ||
     createEnvironmentMutation.isPending ||
@@ -1012,6 +1125,89 @@ export default function DeploymentList() {
         </Dialog>
       </div>
 
+      <Dialog
+        open={Boolean(configDeployment)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfigDeployment(null);
+            setConfigDraft("");
+            setConfigError("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Runtime Config</DialogTitle>
+            <DialogDescription>
+              Save a new config snapshot and re-provision this deployment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Deployment</Label>
+                <Input
+                  value={configDeployment?.id ?? ""}
+                  readOnly
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Runtime</Label>
+                <Select
+                  value={configProvider}
+                  onValueChange={(value) =>
+                    setConfigProvider(value as RuntimeProvider)
+                  }
+                >
+                  <SelectTrigger data-testid="select-config-runtime-provider">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="managed-sandbox">Managed Sandbox</SelectItem>
+                    <SelectItem value="docker-local">Docker Local</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="runtimeConfig">Config JSON</Label>
+              <Textarea
+                id="runtimeConfig"
+                value={configDraft}
+                onChange={(event) => setConfigDraft(event.target.value)}
+                className="min-h-96 font-mono text-xs"
+                spellCheck={false}
+                data-testid="textarea-runtime-config"
+              />
+            </div>
+            {configError && (
+              <div className="flex items-start gap-2 text-sm text-destructive">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <span>{configError}</span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfigDeployment(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveConfig}
+              disabled={isDeploying || !configDeployment}
+              data-testid="button-save-runtime-config"
+            >
+              {isDeploying ? "Applying..." : "Apply Config"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {isLoading ? (
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
@@ -1142,6 +1338,12 @@ export default function DeploymentList() {
                             disabled={isRuntimeBusy}
                           >
                             <Rocket className="mr-2 h-4 w-4" /> Provision Runtime
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => openConfigEditor(deployment)}
+                            disabled={isRuntimeBusy}
+                          >
+                            <Code2 className="mr-2 h-4 w-4" /> Edit Config
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() =>

@@ -110,6 +110,12 @@ export const ProvisionDeploymentBody = z.object({
   configOverrides: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const ImportAssistantBuildBody = z.object({
+  version: z.string().min(1).max(100).optional(),
+  wrapperSlug: z.string().min(1).max(100).optional(),
+  metadata,
+});
+
 // ── Approvals ──────────────────────────────────────────────────────────────────
 
 export const CreateApprovalBody = z.object({

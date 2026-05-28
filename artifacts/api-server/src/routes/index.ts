@@ -4,6 +4,7 @@ import tenantsRouter from "./tenants";
 import workspacesRouter from "./workspaces";
 import environmentsRouter from "./environments";
 import packagesRouter from "./packages";
+import assistantBuildsRouter from "./assistantBuilds";
 import deploymentsRouter from "./deployments";
 import auditRouter from "./audit";
 import actionLedgerRouter from "./actionLedger";
@@ -29,6 +30,8 @@ router.use(
 
 // Packages & package versions — /tenants/:tenantId/packages
 router.use("/tenants/:tenantId/packages", packagesRouter);
+
+router.use("/tenants/:tenantId/assistant-builds", assistantBuildsRouter);
 
 // Deployments & config snapshots
 router.use("/tenants/:tenantId", deploymentsRouter);
