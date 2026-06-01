@@ -4,29 +4,29 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { mockupPreviewPlugin } from "./mockupPreviewPlugin";
 
-const rawPort = process.env.PORT;
+function getPort() {
+  const rawPort = process.env.PORT;
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
+  if (!rawPort) {
+    throw new Error(
+      "PORT environment variable is required but was not provided.",
+    );
+  }
+
+  const port = Number(rawPort);
+
+  if (Number.isNaN(port) || port <= 0) {
+    throw new Error(`Invalid PORT value: "${rawPort}"`);
+  }
+
+  return port;
 }
 
-const port = Number(rawPort);
+export default defineConfig(({ command }) => {
+  const port = command === "serve" ? getPort() : undefined;
+  const basePath = process.env.BASE_PATH ?? "/";
 
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
-
-export default defineConfig({
+  return {
   base: basePath,
   plugins: [
     mockupPreviewPlugin(),
@@ -44,7 +44,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port,
+    ...(port === undefined ? {} : { port }),
     host: "0.0.0.0",
     allowedHosts: true,
     fs: {
@@ -52,8 +52,9 @@ export default defineConfig({
     },
   },
   preview: {
-    port,
+    ...(port === undefined ? {} : { port }),
     host: "0.0.0.0",
     allowedHosts: true,
   },
+  };
 });

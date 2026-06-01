@@ -18,11 +18,11 @@ export default function AuditList() {
     }
   });
 
-  const filtered = data?.items.filter(a => 
+  const filtered = (data?.items ?? []).filter(a => 
     a.eventType.toLowerCase().includes(search.toLowerCase()) || 
     a.resourceId.toLowerCase().includes(search.toLowerCase()) ||
     a.actorId.toLowerCase().includes(search.toLowerCase())
-  ) || [];
+  );
 
   return (
     <div className="p-8">

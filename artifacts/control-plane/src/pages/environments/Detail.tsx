@@ -249,7 +249,7 @@ export default function EnvironmentDetail() {
         <div className="space-y-4">
           {[1, 2].map((i) => <div key={i} className="h-16 bg-card border rounded-lg animate-pulse" />)}
         </div>
-      ) : deployments?.items.length === 0 ? (
+      ) : (deployments?.items ?? []).length === 0 ? (
         <div className="text-center py-20 bg-card rounded-lg border border-dashed">
           <Activity className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-lg font-medium">No deployments in this environment</h3>
@@ -266,7 +266,7 @@ export default function EnvironmentDetail() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {deployments?.items.map((d) => (
+              {(deployments?.items ?? []).map((d) => (
                 <tr key={d.id} className="hover:bg-muted/50 transition-colors" data-testid={`row-deployment-${d.id}`}>
                   <td className="px-6 py-4 font-mono text-primary">{d.id}</td>
                   <td className="px-6 py-4 font-mono text-muted-foreground">{d.packageVersionId}</td>

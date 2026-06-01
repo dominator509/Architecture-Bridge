@@ -50,10 +50,10 @@ export default function WorkspaceList() {
     );
   };
 
-  const filtered = data?.items.filter(w =>
+  const filtered = (data?.items ?? []).filter(w =>
     w.name.toLowerCase().includes(search.toLowerCase()) ||
     w.id.toLowerCase().includes(search.toLowerCase())
-  ) || [];
+  );
 
   return (
     <div className="p-8">

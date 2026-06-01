@@ -271,7 +271,7 @@ export default function PackageDetail() {
             <div key={i} className="h-16 animate-pulse rounded-lg border bg-card" />
           ))}
         </div>
-      ) : versions?.items.length === 0 ? (
+      ) : (versions?.items ?? []).length === 0 ? (
         <div className="border border-dashed bg-card py-20 text-center">
           <Bot className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
           <h3 className="text-lg font-medium">No versions</h3>
@@ -290,7 +290,7 @@ export default function PackageDetail() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {versions?.items.map((agentVersion) => {
+              {(versions?.items ?? []).map((agentVersion) => {
                 const manifest = getManifest(agentVersion.manifest);
                 const capabilityList = Array.isArray(manifest.capabilities)
                   ? manifest.capabilities.join(", ")

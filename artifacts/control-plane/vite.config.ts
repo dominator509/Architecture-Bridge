@@ -3,29 +3,31 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
-const rawPort = process.env.PORT;
+const apiProxyTarget = process.env.API_PROXY_TARGET ?? "http://localhost:3001";
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
+function getPort() {
+  const rawPort = process.env.PORT;
+
+  if (!rawPort) {
+    throw new Error(
+      "PORT environment variable is required but was not provided.",
+    );
+  }
+
+  const port = Number(rawPort);
+
+  if (Number.isNaN(port) || port <= 0) {
+    throw new Error(`Invalid PORT value: "${rawPort}"`);
+  }
+
+  return port;
 }
 
-const port = Number(rawPort);
+export default defineConfig(({ command }) => {
+  const port = command === "serve" ? getPort() : undefined;
+  const basePath = process.env.BASE_PATH ?? "/";
 
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
-
-export default defineConfig({
+  return {
   base: basePath,
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -41,17 +43,29 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port,
+    ...(port === undefined ? {} : { port }),
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: {
+      "/api": {
+        target: apiProxyTarget,
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.removeHeader("origin");
+          });
+        },
+      },
+    },
     fs: {
       strict: true,
     },
   },
   preview: {
-    port,
+    ...(port === undefined ? {} : { port }),
     host: "0.0.0.0",
     allowedHosts: true,
   },
+  };
 });

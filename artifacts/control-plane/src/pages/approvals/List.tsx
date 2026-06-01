@@ -117,7 +117,7 @@ export default function ApprovalList() {
         <div className="space-y-4">
           {[1, 2, 3].map(i => <div key={i} className="h-16 bg-card border rounded-lg animate-pulse" />)}
         </div>
-      ) : data?.items.length === 0 ? (
+      ) : (data?.items ?? []).length === 0 ? (
         <div className="text-center py-20 bg-card rounded-lg border border-dashed">
           <ShieldCheck className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-lg font-medium">No pending approvals</h3>
@@ -136,7 +136,7 @@ export default function ApprovalList() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {data?.items.map(a => (
+              {(data?.items ?? []).map(a => (
                 <tr key={a.id} className="hover:bg-muted/50 transition-colors">
                   <td className="px-6 py-4 font-mono font-medium text-sm">{a.id}</td>
                   <td className="px-6 py-4">

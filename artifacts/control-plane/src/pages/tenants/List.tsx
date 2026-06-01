@@ -45,10 +45,10 @@ export default function TenantList() {
     );
   };
 
-  const filteredTenants = data?.items.filter(t =>
+  const filteredTenants = (data?.items ?? []).filter(t =>
     t.name.toLowerCase().includes(search.toLowerCase()) ||
     t.id.toLowerCase().includes(search.toLowerCase())
-  ) || [];
+  );
 
   return (
     <div className="min-h-screen bg-background">

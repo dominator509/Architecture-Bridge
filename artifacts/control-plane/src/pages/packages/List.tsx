@@ -46,10 +46,10 @@ export default function PackageList() {
     );
   };
 
-  const filtered = data?.items.filter(p => 
+  const filtered = (data?.items ?? []).filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) || 
     p.id.toLowerCase().includes(search.toLowerCase())
-  ) || [];
+  );
 
   return (
     <div className="p-8">

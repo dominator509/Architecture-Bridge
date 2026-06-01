@@ -96,9 +96,9 @@ export default function PolicyPlayground() {
   const outcome = decision?.outcome as PolicyOutcome | undefined;
   const outcomeCfg = outcome ? OUTCOME_CONFIG[outcome] : null;
 
-  const filteredDecisions = decisions?.items.filter(d =>
+  const filteredDecisions = (decisions?.items ?? []).filter(d =>
     outcomeFilter === "all" || d.outcome === outcomeFilter,
-  ) ?? [];
+  );
 
   return (
     <div className="p-8">

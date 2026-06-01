@@ -54,10 +54,10 @@ export default function WorkspaceDetail() {
     );
   };
 
-  const filtered = envs?.items.filter(e => 
+  const filtered = (envs?.items ?? []).filter(e => 
     e.name.toLowerCase().includes(search.toLowerCase()) || 
     e.id.toLowerCase().includes(search.toLowerCase())
-  ) || [];
+  );
 
   if (wsLoading) return <div className="p-8"><div className="h-8 w-48 bg-muted animate-pulse rounded" /></div>;
 
