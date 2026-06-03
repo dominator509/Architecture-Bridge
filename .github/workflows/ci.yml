@@ -46,6 +46,9 @@ jobs:
       - name: Install dependencies
         run: npm_config_user_agent=pnpm/ci corepack pnpm install --frozen-lockfile --config.dangerouslyAllowAllBuilds=true
 
+      - name: Audit dependencies
+        run: corepack pnpm audit --audit-level moderate
+
       - name: Push database schema
         run: corepack pnpm --filter @workspace/db run push
 
