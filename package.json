@@ -12,14 +12,5 @@
   "devDependencies": {
     "typescript": "~5.9.2",
     "prettier": "^3.8.1"
-  },
-  "pnpm": {
-    "overrides": {
-      "brace-expansion": "5.0.6",
-      "@esbuild-kit/core-utils>esbuild": "0.25.8",
-      "fast-uri": "3.1.2",
-      "ip-address": "10.1.1",
-      "qs": "6.15.2"
-    }
   }
 }
