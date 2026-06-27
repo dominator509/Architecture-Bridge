@@ -24,7 +24,7 @@ catalog:
   tailwindcss: ^4.1.14
   tsx: ^4.21.0
   vite: ^7.3.2
-  wouter: ^3.3.5
+  wouter: ^3.10.0
   zod: 3.25.76
 
 minimumReleaseAge: 1440
@@ -42,8 +42,11 @@ overrides:
   lodash: '>=4.18.0'
   path-to-regexp: '>=8.4.0'
   picomatch: '>=4.0.4'
-  brace-expansion: '>=2.0.3'
+  brace-expansion: 5.0.6
+  fast-uri: 3.1.2
+  ip-address: 10.1.1
   postcss: '>=8.5.10'
+  qs: 6.15.2
   yaml: '>=2.8.3'
   # ── Build tooling overrides ────────────────────────────────────────────────
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
