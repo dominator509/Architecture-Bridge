@@ -29,11 +29,11 @@ catalog:
 
 minimumReleaseAge: 1440
 
-onlyBuiltDependencies:
-  - '@swc/core'
-  - esbuild
-  - msw
-  - unrs-resolver
+allowBuilds:
+  '@swc/core': true
+  esbuild: true
+  msw: true
+  unrs-resolver: true
 
 overrides:
   # ── Security CVE overrides ─────────────────────────────────────────────────
@@ -43,10 +43,11 @@ overrides:
   path-to-regexp: '>=8.4.0'
   picomatch: '>=4.0.4'
   brace-expansion: 5.0.6
-  fast-uri: 3.1.2
-  ip-address: 10.1.1
+  fast-uri: 3.1.6
+  ip-address: 10.3.1
+  undici: 7.29.0
   postcss: '>=8.5.10'
-  qs: 6.15.2
+  qs: 6.16.0
   yaml: '>=2.8.3'
   # ── Build tooling overrides ────────────────────────────────────────────────
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0

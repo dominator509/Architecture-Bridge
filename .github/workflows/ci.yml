@@ -44,7 +44,7 @@ jobs:
         run: corepack enable
 
       - name: Install dependencies
-        run: npm_config_user_agent=pnpm/ci corepack pnpm install --frozen-lockfile --config.dangerouslyAllowAllBuilds=true
+        run: npm_config_user_agent=pnpm/ci corepack pnpm install --frozen-lockfile
 
       - name: Audit dependencies
         run: corepack pnpm audit --audit-level moderate
